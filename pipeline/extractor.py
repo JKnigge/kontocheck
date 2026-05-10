@@ -24,36 +24,61 @@ class Transaction:
 
 
 _SYSTEM_PROMPT = (
-    "You are a bank statement parser. "
+    "You are a bank statement parser for German and European bank statements. "
     "You receive the raw text of a bank statement and extract every transaction into a JSON array. "
     "Output ONLY the JSON array — no markdown, no explanation, no code fences. "
-    "Skip header rows, balance lines, and non-transaction text."
+    "\n\n"
+    "Rules:\n"
+    "- Skip non-transaction lines: account headers, opening/closing balances, page totals, column headings.\n"
+    "- Dates may appear as DD.MM.YYYY (German) or YYYY-MM-DD (ISO) — always output ISO YYYY-MM-DD.\n"
+    "- Amounts appear as positive numbers regardless of direction; determine direction from context "
+    "(a '+' sign, the word 'Gutschrift'/'Haben', or a dedicated credit column means 'credit'; "
+    "a '-' sign, 'Lastschrift'/'Soll', or a debit column means 'debit').\n"
+    "- Do not confuse running balance figures with transaction amounts.\n"
+    "- If a field cannot be determined, omit the transaction rather than guessing."
 )
 
 _USER_PROMPT_TEMPLATE = (
     "Extract all transactions from this bank statement text.\n\n"
-    "Each transaction must be a JSON object with these fields:\n"
-    '- "date": booking date in YYYY-MM-DD format\n'
-    '- "description": the description/payee text as shown on the statement\n'
-    '- "amount": the transaction amount as a positive decimal string in euros (e.g. "43.20")\n'
+    "Each transaction must be a JSON object with exactly these fields:\n"
+    '- "date": booking date in YYYY-MM-DD format (convert DD.MM.YYYY if necessary)\n'
+    '- "description": the full description or payee text exactly as it appears\n'
+    '- "amount": the transaction amount as a positive JSON number, not a string (e.g. 43.20)\n'
     '- "direction": "debit" if money left the account, "credit" if money entered the account\n\n'
+    "Example output (two transactions):\n"
+    '[\n'
+    '  {{"date": "2024-03-01", "description": "REWE Filiale Hamburg", "amount": 43.20, "direction": "debit"}},\n'
+    '  {{"date": "2024-03-03", "description": "Gehalt Muster GmbH", "amount": 2500.00, "direction": "credit"}}\n'
+    ']\n\n'
     "Raw statement text:\n\n{text}"
 )
 
 _RETRY_PROMPT_TEMPLATE = (
-    "The previous output could not be parsed as a valid JSON array. "
-    "Please try again. Output ONLY the JSON array with no extra text.\n\n"
-    "Raw statement text:\n\n{text}"
+    "Your previous response could not be parsed as a valid JSON array. "
+    "The error was: {error}\n\n"
+    "Common mistakes to avoid:\n"
+    "- Wrapping the array in markdown fences (```json ... ```) — output raw JSON only\n"
+    "- Using strings instead of numbers for 'amount' (use 43.20 not \"43.20\")\n"
+    "- Including explanatory text before or after the array\n"
+    "- Trailing commas after the last element\n\n"
+    "Output ONLY the JSON array. Raw statement text:\n\n{text}"
 )
 
 
+# BUG FIX 1: re.DOTAIL → re.DOTALL (typo caused <think> blocks to never be stripped)
 def _strip_thinking(text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTAIL).strip()
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+# BUG FIX 2: Create the Ollama client once at module level (not inside every call)
+_client = ollama.Client(host=config.OLLAMA_URL)
 
 
 def _call_llm(prompt: str, system: str, num_predict: int) -> str:
-    client = ollama.Client(host=config.OLLAMA_URL)
-    response = client.chat(
+    # BUG FIX 3: response is a dict — use subscript access, not attribute access.
+    # response.message.content raised AttributeError on every call; the working
+    # extractor correctly uses response["message"]["content"].
+    response = _client.chat(
         model=config.OLLAMA_MODEL,
         messages=[
             {"role": "system", "content": system},
@@ -65,12 +90,15 @@ def _call_llm(prompt: str, system: str, num_predict: int) -> str:
         },
         think=False,
     )
-    content = response.message.content or ""
+    content = response["message"]["content"] or ""
     return _strip_thinking(content)
 
 
 def _parse_transaction_list(raw_json: str) -> list[dict]:
-    match = re.search(r"\[.*\]", raw_json, flags=re.DOTAIL)
+    # BUG FIX 4: re.DOTAIL → re.DOTALL (same typo as in _strip_thinking).
+    # Without DOTALL the '.' in the pattern does not match newlines, so the
+    # regex never captures a multi-line JSON array and always raises ValueError.
+    match = re.search(r"\[.*\]", raw_json, flags=re.DOTALL)
     if not match:
         raise ValueError("No JSON array found in LLM output")
     return json.loads(match.group())
@@ -133,7 +161,7 @@ def parse_transactions(raw_text: str) -> list[Transaction]:
         tx_list = _parse_transaction_list(raw_json)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("Initial LLM parse failed: %s — retrying once", e)
-        retry_prompt = _RETRY_PROMPT_TEMPLATE.format(text=raw_text)
+        retry_prompt = _RETRY_PROMPT_TEMPLATE.format(error=e, text=raw_text)
         raw_json = _call_llm(retry_prompt, _SYSTEM_PROMPT, num_predict=2000)
         try:
             tx_list = _parse_transaction_list(raw_json)
