@@ -65,19 +65,14 @@ _RETRY_PROMPT_TEMPLATE = (
 )
 
 
-# BUG FIX 1: re.DOTAIL → re.DOTALL (typo caused <think> blocks to never be stripped)
 def _strip_thinking(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
-# BUG FIX 2: Create the Ollama client once at module level (not inside every call)
 _client = ollama.Client(host=config.OLLAMA_URL)
 
 
 def _call_llm(prompt: str, system: str, num_predict: int) -> str:
-    # BUG FIX 3: response is a dict — use subscript access, not attribute access.
-    # response.message.content raised AttributeError on every call; the working
-    # extractor correctly uses response["message"]["content"].
     response = _client.chat(
         model=config.OLLAMA_MODEL,
         messages=[
@@ -95,9 +90,6 @@ def _call_llm(prompt: str, system: str, num_predict: int) -> str:
 
 
 def _parse_transaction_list(raw_json: str) -> list[dict]:
-    # BUG FIX 4: re.DOTAIL → re.DOTALL (same typo as in _strip_thinking).
-    # Without DOTALL the '.' in the pattern does not match newlines, so the
-    # regex never captures a multi-line JSON array and always raises ValueError.
     match = re.search(r"\[.*\]", raw_json, flags=re.DOTALL)
     if not match:
         raise ValueError("No JSON array found in LLM output")

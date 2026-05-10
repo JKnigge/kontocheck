@@ -49,7 +49,7 @@ try:
     transactions = parse_transactions(raw_text)
     print(f"   Extracted {len(transactions)} transactions\n")
     for i, tx in enumerate(transactions, 1):
-        print(f"   {i:3d}. {tx.date}  {tx.direction:6s}  €{tx.amount:>10s}  {tx.description}")
+        print(f"   {i:3d}. {tx.date}  {tx.direction:6s}  €{str(tx.amount):>10s}  {tx.description}")
 except RuntimeError as e:
     print(f"   FAILED: {e}")
     sys.exit(1)
