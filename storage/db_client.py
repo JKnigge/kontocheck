@@ -72,3 +72,24 @@ def get_regpayment_candidates(signed_cents: int, bank_date: date) -> list[dict]:
     cursor.close()
     logger.debug("Regpayment candidates for signed_cents=%d, bank_date=%s: %d rows", signed_cents, bank_date, len(rows))
     return rows
+
+def get_regpayment_candidates_by_date(bank_date: date) -> list[dict]:
+    """
+    Return all regpayment rows active on bank_date for the configured user,
+    regardless of amount. Used for amount mismatch detection.
+    """
+    sql = """
+        SELECT id, amount, reason, frequency, startDate, endDate
+        FROM regpayment
+        WHERE startDate <= %s
+          AND (endDate IS NULL OR endDate >= %s)
+          AND user = %s
+    """
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(sql, (bank_date, bank_date, config.REGPAYMENT_USER_ID))
+        return cursor.fetchall()
+    except mysql.connector.Error as exc:
+        logger.warning("Could not fetch regpayment candidates by date: %s", exc)
+        return []
