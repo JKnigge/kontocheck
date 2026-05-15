@@ -156,35 +156,38 @@ def _assign_delay_status(date_gap_days: int) -> str:
 def _try_match_receipt(
     tx: Transaction,
     used_receipt_ids: set[int],
-) -> Optional[MatchResult]:
+    ) -> tuple[Optional[MatchResult], Optional[dict]]:
     """
     Attempt to match a transaction against the receipts table.
-    Queries by exact euro amount with date constraint, then checks name
-    similarity for each candidate. Returns the first definitive match,
-    or the first uncertain candidate as a fallback, or None.
+
+    Returns a tuple (definitive_result, uncertain_candidate):
+      - If a candidate's name similarity is "match": the first such candidate
+        is built into a MatchResult (which also commits the id to
+        used_receipt_ids) and returned as definitive_result.
+      - Otherwise the first "uncertain" candidate (if any) is returned as
+        uncertain_candidate WITHOUT being committed. The caller decides
+        whether to fall back to it after checking regpayment for a
+        definitive match (per TECHNICAL_SPEC §7.2 step 6).
     """
     candidates = db_client.get_receipt_candidates(tx.amount, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_receipt_ids]
 
     if not candidates:
-        return None
+        return (None, None)
 
-    uncertain_fallback: Optional[tuple] = None
+    uncertain_fallback: Optional[dict] = None
 
     for c in candidates:
         issuer = c["issuer"] or ""
         similarity = _check_name_similarity(tx.description, issuer)
 
         if similarity == "match":
-            return _build_receipt_result(tx, c, used_receipt_ids, uncertain=False)
+            return (_build_receipt_result(tx, c, used_receipt_ids, uncertain=False), None)
 
         if similarity == "uncertain" and uncertain_fallback is None:
             uncertain_fallback = c
 
-    if uncertain_fallback is not None:
-        return _build_receipt_result(tx, uncertain_fallback, used_receipt_ids, uncertain=True)
-
-    return None
+    return (None, uncertain_fallback)
 
 
 def _build_receipt_result(
@@ -229,17 +232,22 @@ def _try_match_regpayment(
     tx: Transaction,
     signed_cents: int,
     used_regpayment_ids: set[int],
-) -> Optional[MatchResult]:
+) -> tuple[Optional[MatchResult], Optional[dict]]:
     """
     Attempt to match a transaction against the regpayment table by exact
     signed-cent amount within the valid date range.
-    Returns the first definitive match, uncertain fallback, or None.
+
+    Returns a tuple (definitive_result, uncertain_candidate) following the
+    same contract as _try_match_receipt: a definitive "match" is built and
+    committed immediately; an "uncertain" candidate is returned uncommitted
+    so the caller can prefer it only after both sources have failed to
+    produce a definitive match.
     """
     candidates = db_client.get_regpayment_candidates(signed_cents, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_regpayment_ids]
 
     if not candidates:
-        return None
+        return (None, None)
 
     uncertain_fallback: Optional[dict] = None
 
@@ -248,15 +256,12 @@ def _try_match_regpayment(
         similarity = _check_name_similarity(tx.description, reason)
 
         if similarity == "match":
-            return _build_regpayment_result(tx, c, used_regpayment_ids, uncertain=False)
+            return (_build_regpayment_result(tx, c, used_regpayment_ids, uncertain=False), None)
 
         if similarity == "uncertain" and uncertain_fallback is None:
             uncertain_fallback = c
 
-    if uncertain_fallback is not None:
-        return _build_regpayment_result(tx, uncertain_fallback, used_regpayment_ids, uncertain=True)
-
-    return None
+    return (None, uncertain_fallback)
 
 
 def _build_regpayment_result(
@@ -356,12 +361,32 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
     for tx in sorted(transactions, key=lambda t: t.date):
         signed_cents = _to_signed_cents(tx.amount, tx.direction)
 
-        result = (
-            _try_match_receipt(tx, used_receipt_ids)
-            or _try_match_regpayment(tx, signed_cents, used_regpayment_ids)
-            or _try_regpayment_amount_mismatch(tx, used_regpayment_ids)
-            or MatchResult(transaction=tx, status=NO_MATCH)
-        )
+        # Per TECHNICAL_SPEC §7.2: definitive ("match") candidates from either
+        # source beat any "uncertain" candidate. Receipts have priority within
+        # each tier (definitive and uncertain) because card/cash purchases are
+        # more likely to have a receipt than to be a regular payment.
+        receipt_def, receipt_unc = _try_match_receipt(tx, used_receipt_ids)
+        if receipt_def is not None:
+            result = receipt_def
+        else:
+            regpay_def, regpay_unc = _try_match_regpayment(
+                tx, signed_cents, used_regpayment_ids,
+            )
+            if regpay_def is not None:
+                result = regpay_def
+            elif receipt_unc is not None:
+                result = _build_receipt_result(
+                    tx, receipt_unc, used_receipt_ids, uncertain=True,
+                )
+            elif regpay_unc is not None:
+                result = _build_regpayment_result(
+                    tx, regpay_unc, used_regpayment_ids, uncertain=True,
+                )
+            else:
+                result = (
+                    _try_regpayment_amount_mismatch(tx, used_regpayment_ids)
+                    or MatchResult(transaction=tx, status=NO_MATCH)
+                )
 
         results.append(result)
         logger.debug(
