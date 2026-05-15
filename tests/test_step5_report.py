@@ -28,6 +28,16 @@ from unittest.mock import MagicMock, patch
 # Ensure project root is on the path regardless of where the script is launched
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Switch stdout/stderr to UTF-8 so the status emoji and box-drawing characters
+# in the test output print cleanly on Windows. This test mocks `config`, so the
+# automatic reconfigure in config.py is not in effect here.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # ── Set up an isolated output folder for the test ─────────────────────────────
 
 TEMP_OUTPUT = Path(tempfile.mkdtemp(prefix="kontocheck_report_test_"))

@@ -5,6 +5,27 @@ from dotenv import load_dotenv
 import os
 
 
+def _enable_utf8_console() -> None:
+    """
+    Switch stdout/stderr to UTF-8 so the status emoji (✅ ⚠️ ❌) and any
+    German characters in transaction descriptions or log lines print
+    cleanly on Windows, where the default console encoding is cp1252
+    and would otherwise raise UnicodeEncodeError.
+
+    Safe to call multiple times; a no-op on streams that don't support
+    reconfigure (e.g. pytest captured streams).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_enable_utf8_console()
+
+
 def _require(key: str) -> str:
     value = os.getenv(key)
     if value is None:
