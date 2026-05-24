@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from xxlimited_35 import Null
 
 import ollama
 import pdfplumber
@@ -209,14 +210,17 @@ def _validate_transaction(obj: dict, raw_text: str) -> Transaction | None:
         logger.warning("Skipping transaction with invalid amount: %s", obj)
         return None
 
-    if amount <= 0:
-        logger.warning("Skipping transaction with non-positive amount: %s", obj)
-        return None
-
     direction = obj.get("direction", "").lower()
     if direction not in ("debit", "credit"):
         logger.warning("Skipping transaction with invalid direction: %s", obj)
-        return None
+
+    if amount <= 0:
+        logger.warning("Transaction with non-positive amount: %s", obj)
+        if direction == "credit":
+            logger.warning("Negative amount does not match direction: %s")
+            return None
+        direction = "debit"
+        amount = (-1) * amount
 
     description = str(obj.get("description", "")).strip()
     if not description:
