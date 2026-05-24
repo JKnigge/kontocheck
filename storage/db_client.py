@@ -30,6 +30,7 @@ def test_connection() -> bool:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT 1")
+        cursor.fetchone()
         cursor.close()
         logger.info("Database connection successful.")
         return True
