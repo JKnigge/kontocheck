@@ -48,7 +48,9 @@ _USER_PROMPT_TEMPLATE = (
     "Each transaction must be a JSON object with exactly these fields:\n"
     '"date": booking date in YYYY-MM-DD format (convert DD.MM.YYYY if necessary)\n'
     '"description": ALL description lines for this entry joined into one string with spaces — '
-    "include the transaction type, payee name, and any reference or ID lines\n"
+    "include the transaction type, payee name (important!), and any reference or ID lines\n"
+    "Note that the description often stretches over multiple lines, including the lines after the line containing the amount."
+    'Make sure to include all relevant lines! Descriptions must not consist of general terms (such as "Abrechnung" or "Basislastschrift") only but contain all relevant information!'
     '"amount": the transaction amount as a positive JSON number with a period as decimal separator '
     "(e.g. 43.20, never 43,20)\n"
     '"direction": "debit" if money left the account, "credit" if money entered the account\n\n'
@@ -62,10 +64,10 @@ _USER_PROMPT_TEMPLATE = (
     ']\n\n'
     "Another example — a credit entry:\n"
     "  03.03.2024 | Lohn, Gehalt, Rente     |        | 2500,00 |\n"
-    "             | Muster GmbH Loh/Gehalt  |        |         |\n"
+    "             | Muster GmbH Lohn/Gehalt  |        |         |\n"
     "must produce:\n"
     '[\n'
-    '  {{"date": "2024-03-03", "description": "Lohn, Gehalt, Rente Muster GmbH Loh/Gehalt", "amount": 2500.00, "direction": "credit"}}\n'
+    '  {{"date": "2024-03-03", "description": "Lohn, Gehalt, Rente Muster GmbH Lohn/Gehalt", "amount": 2500.00, "direction": "credit"}}\n'
     ']\n\n'
     "Raw statement text:\n\n{text}"
 )
