@@ -217,9 +217,18 @@ def _call_llm(prompt: str, system: str, num_predict: int) -> str:
         options={
             "temperature": 0.0,
             "num_predict": num_predict,
+            "num_ctx": 32768,
         },
         think=False,
     )
+    done_reason = response.get("done_reason")
+    if done_reason == "length":
+        logger.warning(
+            "LLM output hit num_predict=%d cap (done_reason=length) — JSON likely truncated",
+            num_predict,
+        )
+    else:
+        logger.debug("LLM call finished with done_reason=%s", done_reason)
     content = response["message"]["content"] or ""
     return _strip_thinking(content)
 
@@ -302,14 +311,14 @@ def parse_transactions(raw_text: str) -> list[Transaction]:
     normalized_text = _normalize_table_rows(raw_text)
 
     prompt = _USER_PROMPT_TEMPLATE.format(text=normalized_text)
-    raw_json = _call_llm(prompt, _SYSTEM_PROMPT, num_predict=2000)
+    raw_json = _call_llm(prompt, _SYSTEM_PROMPT, num_predict=16000)
 
     try:
         tx_list = _parse_transaction_list(raw_json)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("Initial LLM parse failed: %s — retrying once", e)
         retry_prompt = _RETRY_PROMPT_TEMPLATE.format(error=e, text=normalized_text)
-        raw_json = _call_llm(retry_prompt, _SYSTEM_PROMPT, num_predict=2000)
+        raw_json = _call_llm(retry_prompt, _SYSTEM_PROMPT, num_predict=16000)
         try:
             tx_list = _parse_transaction_list(raw_json)
         except (json.JSONDecodeError, ValueError) as e2:
