@@ -30,15 +30,25 @@ _SYSTEM_PROMPT = (
     "Output ONLY the JSON array — no markdown, no explanation, no code fences. "
     "\n\n"
     "Rules:\n"
-    "- Skip non-transaction lines: account headers, opening/closing balances, page totals, column headings.\n"
-    "- Dates may appear as DD.MM.YYYY (German) or YYYY-MM-DD (ISO) — always output ISO YYYY-MM-DD.\n"
+    "- Each transaction begins on a line that starts with a date (DD.MM.YYYY or YYYY-MM-DD). "
+    "The date may be immediately followed by the type label with no space in between "
+    "(e.g. '10.09.2025Basislastschrift'). Every subsequent line that does NOT start with a date "
+    "is a continuation line and belongs to the same transaction — it carries the payee name "
+    "and reference information.\n"
+    "- Emit each transaction exactly once. A transaction spanning four lines is still ONE entry, "
+    "not four. Never output the same date+amount combination twice.\n"
+    "- Skip non-transaction lines: account headers, IBAN/BIC lines, opening/closing balances, "
+    "page totals, column headings, and anything before the first dated line or after the last.\n"
+    "- Always output dates as ISO YYYY-MM-DD.\n"
     "- Amounts use a period as the decimal separator (e.g. 43.20). "
     "Always output amounts as positive JSON numbers.\n"
     "- Determine direction from context: a '+' sign, the word 'Gutschrift'/'Haben', or a value in "
     "a credit column means 'credit'; a '-' sign, 'Lastschrift'/'Soll', or a value in a debit column "
     "means 'debit'.\n"
-    "- Each transaction's description must include ALL text lines belonging to that entry — "
-    "type label, payee name, and any reference numbers — joined with a space.\n"
+    "- The description must concatenate the header line AND all of its continuation lines with single "
+    "spaces. It MUST contain the payee/merchant name (e.g. 'Gemeinde Berlin', 'EDEKA', 'ED.TANKSTELLE'). "
+    "A description consisting only of a generic type label like 'Basislastschrift', 'Kartenzahlung', "
+    "'Überweisung' or 'Lastschrift' is incomplete and wrong — you forgot the continuation lines.\n"
     "- Do not confuse running balance figures with transaction amounts.\n"
     "- If a field cannot be determined, omit the transaction rather than guessing."
 )
@@ -47,28 +57,49 @@ _USER_PROMPT_TEMPLATE = (
     "Extract all transactions from this bank statement text.\n\n"
     "Each transaction must be a JSON object with exactly these fields:\n"
     '"date": booking date in YYYY-MM-DD format (convert DD.MM.YYYY if necessary)\n'
-    '"description": ALL description lines for this entry joined into one string with spaces — '
-    "include the transaction type, payee name (important!), and any reference or ID lines\n"
-    "Note that the description often stretches over multiple lines, including the lines after the line containing the amount."
-    'Make sure to include all relevant lines! Descriptions must not consist of general terms (such as "Abrechnung" or "Basislastschrift") only but contain all relevant information!'
+    '"description": the header line PLUS every following line up to (but not including) the next '
+    "line that starts with a date, all joined into one string with spaces. Must include the "
+    "payee/merchant name. A description consisting only of a generic term like 'Basislastschrift', "
+    "'Kartenzahlung', 'Überweisung' or 'Abrechnung' is WRONG — you missed the continuation lines.\n"
     '"amount": the transaction amount as a positive JSON number with a period as decimal separator '
     "(e.g. 43.20, never 43,20)\n"
     '"direction": "debit" if money left the account, "credit" if money entered the account\n\n'
-    "Example — this raw input block:\n"
-    "  01.03.2024 | Basislastschrift        | -43,20 |\n"
-    "             | REWE Filiale Hamburg    |        |\n"
-    "             | Ref: 98765              |        |\n"
-    "must produce:\n"
+    "Grouping rule (critical):\n"
+    "- A line beginning with a date OPENS a new transaction.\n"
+    "- Every following line that does NOT begin with a date belongs to that same transaction.\n"
+    "- The next line beginning with a date CLOSES the current transaction and opens the next one.\n"
+    "- Emit each transaction exactly once. Never duplicate an entry just because its description "
+    "spans several lines.\n\n"
+    "Example 1 — three transactions in plain-text format (note: date and type label may be glued "
+    "together with no space, and continuation lines have no leading date):\n"
+    "  10.09.2025Basislastschrift -471,00\n"
+    "  Gemeinde Berlin 120435/620 KOSTENBEITRAG\n"
+    "  381,00 EUR VERPFLEGUNG 80,00 EUR GETRAENKEGEL D\n"
+    "  10,00 EUR -25-533-218 MR-23-0449 Gläubiger-ID:\n"
+    "  DE70GEM00000033047\n"
+    "  15.09.2025Kartenzahlung -66,81\n"
+    "  ED.TANKSTELLE/HAMM/../DE 2025-09-13T18:50\n"
+    "  Debitk.29 2099-12 Zahl.System VISA Debit\n"
+    "  15.09.2025Kartenzahlung -55,23\n"
+    "  EDEKA.GEORG.HAMM/HAMM/../DE 2025-09-13T20:54\n"
+    "  Debitk.29 2099-12 Zahl.System VISA Debit\n"
+    "must produce exactly THREE objects (not six, not nine):\n"
     '[\n'
-    '  {{"date": "2024-03-01", "description": "Basislastschrift REWE Filiale Hamburg Ref: 98765", "amount": 43.20, "direction": "debit"}}\n'
+    '  {{"date": "2025-09-10", "description": "Basislastschrift Gemeinde Berlin 120435/620 KOSTENBEITRAG 381,00 EUR VERPFLEGUNG 80,00 EUR GETRAENKEGEL D 10,00 EUR -25-533-218 MR-23-0449 Gläubiger-ID: DE70GEM00000033047", "amount": 471.00, "direction": "debit"}},\n'
+    '  {{"date": "2025-09-15", "description": "Kartenzahlung ED.TANKSTELLE/HAMM/../DE 2025-09-13T18:50 Debitk.29 2099-12 Zahl.System VISA Debit", "amount": 66.81, "direction": "debit"}},\n'
+    '  {{"date": "2025-09-15", "description": "Kartenzahlung EDEKA.GEORG.HAMM/HAMM/../DE 2025-09-13T20:54 Debitk.29 2099-12 Zahl.System VISA Debit", "amount": 55.23, "direction": "debit"}}\n'
     ']\n\n'
-    "Another example — a credit entry:\n"
-    "  03.03.2024 | Lohn, Gehalt, Rente     |        | 2500,00 |\n"
-    "             | Muster GmbH Lohn/Gehalt  |        |         |\n"
+    "Example 2 — a credit entry already collapsed onto one pipe-delimited line:\n"
+    "  03.03.2024 | Lohn, Gehalt, Rente Muster GmbH Lohn/Gehalt | 2500,00\n"
     "must produce:\n"
     '[\n'
     '  {{"date": "2024-03-03", "description": "Lohn, Gehalt, Rente Muster GmbH Lohn/Gehalt", "amount": 2500.00, "direction": "credit"}}\n'
     ']\n\n'
+    "Counter-example — what NOT to do. Given:\n"
+    "  15.09.2025Kartenzahlung -55,23\n"
+    "  EDEKA.GEORG.HAMM/HAMM/../DE 2025-09-13T20:54\n"
+    "do NOT output two entries, and do NOT output a description of just 'Kartenzahlung'. There is "
+    "exactly ONE transaction here and its description must include 'EDEKA.GEORG.HAMM'.\n\n"
     "Raw statement text:\n\n{text}"
 )
 
@@ -79,7 +110,12 @@ _RETRY_PROMPT_TEMPLATE = (
     "- Wrapping the array in markdown fences (```json ... ```) — output raw JSON only\n"
     "- Using strings instead of numbers for 'amount' (use 43.20 not \"43.20\")\n"
     "- Using a comma as decimal separator (use 43.20 not 43,20)\n"
-    "- Capturing only the first line of a multi-line entry — join ALL lines into description\n"
+    "- Capturing only the first line of a multi-line entry — join the header line AND every "
+    "following non-dated line into description\n"
+    "- Emitting the same transaction twice because its description spans several lines — each "
+    "dated line corresponds to exactly ONE output object\n"
+    "- Producing a description that contains only a type label like 'Basislastschrift' or "
+    "'Kartenzahlung' — the payee name (on the next line) MUST be included\n"
     "- Including explanatory text before or after the array\n"
     "- Trailing commas after the last element\n\n"
     "Output ONLY the JSON array. Raw statement text:\n\n{text}"
