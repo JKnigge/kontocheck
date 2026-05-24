@@ -195,7 +195,7 @@ def _parse_transaction_list(raw_json: str) -> list[dict]:
 
 def _validate_transaction(obj: dict, raw_text: str) -> Transaction | None:
     try:
-        tx_date = date.fromisoformat(obj["date"])
+        tx_date = _parse_date(obj["date"])
     except (KeyError, ValueError, TypeError):
         logger.warning("Skipping transaction with invalid date: %s", obj)
         return None
@@ -230,6 +230,15 @@ def _validate_transaction(obj: dict, raw_text: str) -> Transaction | None:
         direction=direction,
         raw_text=raw_text,
     )
+
+
+def _parse_date(date_str):
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"Unrecognized date format: {date_str!r}")
 
 
 def extract_text(pdf_path: Path) -> str:
