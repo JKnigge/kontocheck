@@ -98,6 +98,39 @@ def _strip_thinking(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+# Legal-entity suffixes and generic stopwords stripped before brand-token
+# overlap is computed. Without this, "GmbH" or "Deutschland" alone would
+# trigger spurious matches across totally unrelated companies.
+_BRAND_NOISE_TOKENS = frozenset({
+    "gmbh", "ag", "kg", "ohg", "ug", "kgaa", "se", "ek", "ev",
+    "co", "company", "ltd", "llc", "inc", "corp",
+    "deutschland", "germany", "international",
+    "und", "and", "der", "die", "das", "the", "von",
+})
+
+
+def _has_brand_overlap(bank_description: str, candidate_name: str) -> bool:
+    """
+    Return True if any meaningful brand token (>=3 letters, not a legal-
+    entity suffix or stopword) from the candidate name appears in the bank
+    description, case-insensitive.
+
+    Used as a safety net after the LLM verdict: receipts and regpayment
+    candidates already have matching amount and date, so a single shared
+    brand token (e.g. "OBI" in "OBI GmbH & Co. Deutschland KG" vs.
+    "Kartenzahlung OBI.SAGT.DANKE/Hamburg/DE") is a strong signal that the
+    candidate should not be silently discarded.
+    """
+    desc_lower = bank_description.lower()
+    for raw_token in re.findall(r"[A-Za-zÄÖÜäöüß]+", candidate_name):
+        token = raw_token.lower()
+        if len(token) < 3 or token in _BRAND_NOISE_TOKENS:
+            continue
+        if token in desc_lower:
+            return True
+    return False
+
+
 def _check_name_similarity(bank_description: str, candidate_name: str) -> str:
     """
     Ask the LLM whether a bank statement description and a candidate name
@@ -106,14 +139,30 @@ def _check_name_similarity(bank_description: str, candidate_name: str) -> str:
     Returns: "match" | "no_match" | "uncertain"
     Falls back to "uncertain" on any LLM error so the candidate is kept
     as a fallback rather than silently discarded.
+
+    Candidates reaching this function already have matching amount and date,
+    so we bias toward keeping them: a clear shared brand token overrides an
+    LLM "no_match" verdict to "uncertain" so it surfaces as a suggestion in
+    the final report instead of being dropped.
     """
     if not candidate_name.strip():
         return "no_match"
 
     prompt = (
-        f'Could the bank statement description "{bank_description}" '
-        f'refer to the same entity as "{candidate_name}"?\n\n'
-        'Reply with exactly one word: "match", "no_match", or "uncertain".'
+        f'A bank statement transaction has already been matched by amount '
+        f'and date to a candidate from our records. Your job is to verify '
+        f'whether they refer to the same entity.\n\n'
+        f'Bank statement description: "{bank_description}"\n'
+        f'Candidate name: "{candidate_name}"\n\n'
+        f'Bank statement descriptions typically contain only a shop or brand '
+        f'name, often mangled with city names, terminal IDs, payment-method '
+        f'prefixes ("Kartenzahlung"), or marketing slogans (e.g. '
+        f'"OBI.SAGT.DANKE/Hamburg/DE"). Our records may hold the full legal '
+        f'entity name (e.g. "OBI GmbH & Co. Deutschland KG"). A shared '
+        f'distinctive brand token is sufficient to count as a match — you '
+        f'do not need an exact string equality. Reply "no_match" only when '
+        f'the names clearly refer to different entities.\n\n'
+        f'Reply with exactly one word: "match", "no_match", or "uncertain".'
     )
     try:
         response = _client.chat(
@@ -123,11 +172,14 @@ def _check_name_similarity(bank_description: str, candidate_name: str) -> str:
             think=False,
         )
         content = _strip_thinking(response["message"]["content"] or "")
-        # Check the first word only — we asked for exactly one word
         first_word = content.strip().lower().split()[0] if content.strip() else ""
         if first_word == "match":
             return "match"
         if first_word == "uncertain":
+            return "uncertain"
+        # LLM said "no_match" (or unparseable). Apply brand-overlap safety
+        # net so a clear shared token still surfaces as a suggestion.
+        if _has_brand_overlap(bank_description, candidate_name):
             return "uncertain"
         return "no_match"
     except Exception as exc:
