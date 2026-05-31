@@ -409,8 +409,10 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
     used_regpayment_ids: set[int] = set()
 
     results: list[MatchResult] = []
+    i = 1
 
     for tx in sorted(transactions, key=lambda t: t.date):
+        logger.info("Matching transaction %d/%d...", i, len(transactions))
         signed_cents = _to_signed_cents(tx.amount, tx.direction)
 
         # Per TECHNICAL_SPEC §7.2: definitive ("match") candidates from either
@@ -440,6 +442,8 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
                     or MatchResult(transaction=tx, status=NO_MATCH)
                 )
 
+        logger.info("Matching Result for transaction %d/%d: %s", i, len(transactions), result.status)
+        i=i+1
         results.append(result)
         logger.debug(
             "%-40s  %s  →  %s",
