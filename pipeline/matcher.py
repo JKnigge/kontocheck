@@ -94,8 +94,24 @@ def _to_signed_cents(amount: Decimal, direction: str) -> int:
 # ── LLM name similarity ───────────────────────────────────────────────────────
 
 def _strip_thinking(text: str) -> str:
-    """Remove DeepSeek-R1 <think>...</think> blocks as a defensive fallback."""
+    """Remove DeepSeek-R1 thinking blocks as a defensive fallback."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+def _parse_verdict(text: str) -> str:
+    """Return 'match' | 'no_match' | 'uncertain' from a raw LLM reply.
+
+    Defaults to 'no_match' when no recognisable verdict is found.
+    """
+    cleaned = text.strip().lower()
+    if not cleaned:
+        return "no_match"
+    first_word = cleaned.split()[0]
+    if first_word == "match":
+        return "match"
+    if first_word == "uncertain":
+        return "uncertain"
+    return "no_match"
 
 
 # Legal-entity suffixes and generic stopwords stripped before brand-token
@@ -172,10 +188,10 @@ def _check_name_similarity(bank_description: str, candidate_name: str) -> str:
             think=False,
         )
         content = _strip_thinking(response["message"]["content"] or "")
-        first_word = content.strip().lower().split()[0] if content.strip() else ""
-        if first_word == "match":
+        verdict = _parse_verdict(content)
+        if verdict == "match":
             return "match"
-        if first_word == "uncertain":
+        if verdict == "uncertain":
             return "uncertain"
         # LLM said "no_match" (or unparseable). Apply brand-overlap safety
         # net so a clear shared token still surfaces as a suggestion.
