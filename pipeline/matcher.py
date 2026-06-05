@@ -255,7 +255,8 @@ def _try_match_receipt(
         similarity = _check_name_similarity(tx.description, issuer)
 
         if similarity == "match":
-            return (_build_receipt_result(tx, c, used_receipt_ids, uncertain=False), None)
+            used_receipt_ids.add(c["id"])
+            return (_build_receipt_result(tx, c, uncertain=False), None)
 
         if similarity == "uncertain" and uncertain_fallback is None:
             uncertain_fallback = c
@@ -266,10 +267,9 @@ def _try_match_receipt(
 def _build_receipt_result(
     tx: Transaction,
     c: dict,
-    used_receipt_ids: set[int],
     uncertain: bool,
 ) -> MatchResult:
-    """Build a MatchResult for a receipt candidate and mark it as used."""
+    """Build a MatchResult for a receipt candidate (pure, no side effects)."""
     gap = _compute_date_gap(tx.date, c["receipt_date"])
     status = _assign_delay_status(gap)
     notes: list[str] = []
@@ -277,8 +277,6 @@ def _build_receipt_result(
     if uncertain:
         notes.append("Uncertain name match — please verify")
 
-    # Bonus feature: flag receipts that belegbot marked for review but
-    # that have not been manually checked yet
     if c.get("manually_checked") is None and c.get("confidence") != "high":
         status = MATCHED_UNREVIEWED
         notes.append("Receipt was flagged by belegbot and may not have been manually reviewed")
@@ -286,7 +284,6 @@ def _build_receipt_result(
     if gap > config.DATE_TIER1_DAYS:
         notes.append(f"Date gap: {gap} days between receipt date and bank booking")
 
-    used_receipt_ids.add(c["id"])
     return MatchResult(
         transaction=tx,
         status=status,
@@ -329,7 +326,8 @@ def _try_match_regpayment(
         similarity = _check_name_similarity(tx.description, reason)
 
         if similarity == "match":
-            return (_build_regpayment_result(tx, c, used_regpayment_ids, uncertain=False), None)
+            used_regpayment_ids.add(c["id"])
+            return (_build_regpayment_result(tx, c, uncertain=False), None)
 
         if similarity == "uncertain" and uncertain_fallback is None:
             uncertain_fallback = c
@@ -340,11 +338,10 @@ def _try_match_regpayment(
 def _build_regpayment_result(
     tx: Transaction,
     c: dict,
-    used_regpayment_ids: set[int],
     uncertain: bool,
     amount_mismatch: bool = False,
 ) -> MatchResult:
-    """Build a MatchResult for a regpayment candidate and mark it as used."""
+    """Build a MatchResult for a regpayment candidate (pure, no side effects)."""
     notes: list[str] = []
 
     if uncertain:
@@ -359,7 +356,6 @@ def _build_regpayment_result(
 
     status = AMOUNT_MISMATCH if amount_mismatch else MATCHED
 
-    used_regpayment_ids.add(c["id"])
     return MatchResult(
         transaction=tx,
         status=status,
@@ -399,8 +395,9 @@ def _try_regpayment_amount_mismatch(
         similarity = _check_name_similarity(tx.description, reason)
 
         if similarity == "match":
+            used_regpayment_ids.add(c["id"])
             return _build_regpayment_result(
-                tx, c, used_regpayment_ids,
+                tx, c,
                 uncertain=False, amount_mismatch=True,
             )
 
@@ -408,8 +405,9 @@ def _try_regpayment_amount_mismatch(
             uncertain_fallback = c
 
     if uncertain_fallback is not None:
+        used_regpayment_ids.add(uncertain_fallback["id"])
         return _build_regpayment_result(
-            tx, uncertain_fallback, used_regpayment_ids,
+            tx, uncertain_fallback,
             uncertain=True, amount_mismatch=True,
         )
 
@@ -450,12 +448,14 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
             if regpay_def is not None:
                 result = regpay_def
             elif receipt_unc is not None:
+                used_receipt_ids.add(receipt_unc["id"])
                 result = _build_receipt_result(
-                    tx, receipt_unc, used_receipt_ids, uncertain=True,
+                    tx, receipt_unc, uncertain=True,
                 )
             elif regpay_unc is not None:
+                used_regpayment_ids.add(regpay_unc["id"])
                 result = _build_regpayment_result(
-                    tx, regpay_unc, used_regpayment_ids, uncertain=True,
+                    tx, regpay_unc, uncertain=True,
                 )
             else:
                 result = (
