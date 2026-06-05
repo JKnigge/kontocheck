@@ -147,6 +147,26 @@ def _has_brand_overlap(bank_description: str, candidate_name: str) -> bool:
     return False
 
 
+def _build_similarity_prompt(bank_description: str, candidate_name: str) -> str:
+    """Build the LLM prompt for name-similarity verification."""
+    return (
+        f'A bank statement transaction has already been matched by amount '
+        f'and date to a candidate from our records. Your job is to verify '
+        f'whether they refer to the same entity.\n\n'
+        f'Bank statement descriptions typically contain only a shop or brand '
+        f'name, often mangled with city names, terminal IDs, payment-method '
+        f'prefixes ("Kartenzahlung"), or marketing slogans (e.g. '
+        f'"OBI.SAGT.DANKE/Hamburg/DE"). Our records may hold the full legal '
+        f'entity name (e.g. "OBI GmbH & Co. Deutschland KG"). A shared '
+        f'distinctive brand token is sufficient to count as a match — you '
+        f'do not need an exact string equality. Reply "no_match" only when '
+        f'the names clearly refer to different entities.\n\n'
+        f'You MUST reply with EXACTLY ONE word: "match", "no_match", or "uncertain".'
+        f'Bank statement description: "{bank_description}"\n'
+        f'Candidate name: "{candidate_name}"\n\n'
+    )
+
+
 def _check_name_similarity(bank_description: str, candidate_name: str) -> str:
     """
     Ask the LLM whether a bank statement description and a candidate name
@@ -164,22 +184,7 @@ def _check_name_similarity(bank_description: str, candidate_name: str) -> str:
     if not candidate_name.strip():
         return "no_match"
 
-    prompt = (
-        f'A bank statement transaction has already been matched by amount '
-        f'and date to a candidate from our records. Your job is to verify '
-        f'whether they refer to the same entity.\n\n'
-        f'Bank statement descriptions typically contain only a shop or brand '
-        f'name, often mangled with city names, terminal IDs, payment-method '
-        f'prefixes ("Kartenzahlung"), or marketing slogans (e.g. '
-        f'"OBI.SAGT.DANKE/Hamburg/DE"). Our records may hold the full legal '
-        f'entity name (e.g. "OBI GmbH & Co. Deutschland KG"). A shared '
-        f'distinctive brand token is sufficient to count as a match — you '
-        f'do not need an exact string equality. Reply "no_match" only when '
-        f'the names clearly refer to different entities.\n\n'
-        f'You MUST reply with EXACTLY ONE word: "match", "no_match", or "uncertain".'
-        f'Bank statement description: "{bank_description}"\n'
-        f'Candidate name: "{candidate_name}"\n\n'
-    )
+    prompt = _build_similarity_prompt(bank_description, candidate_name)
     try:
         response = _client.chat(
             model=config.OLLAMA_MODEL,
