@@ -242,6 +242,9 @@ def _try_match_receipt(
         whether to fall back to it after checking regpayment for a
         definitive match (per TECHNICAL_SPEC §7.2 step 6).
     """
+    if tx.direction != "debit":
+        return (None, None)
+
     candidates = db_client.get_receipt_candidates(tx.amount, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_receipt_ids]
 

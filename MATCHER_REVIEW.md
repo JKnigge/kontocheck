@@ -12,7 +12,7 @@ Each item below has an explicit status checkbox.
 ## HIGH — correctness bugs
 
 ### H1. Receipts can match credit/refund transactions
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `storage/db_client.py:42-57` (`get_receipt_candidates`), used from
   `pipeline/matcher.py:208` (`_try_match_receipt`).
 - **Problem:** `get_receipt_candidates` filters only by `total_amount`. A €49.99

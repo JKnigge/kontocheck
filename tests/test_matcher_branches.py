@@ -233,7 +233,6 @@ class TestTryMatchReceipt:
         assert 30 in used
         assert 31 not in used
 
-    @pytest.mark.xfail(reason="H1: credit-direction tx should skip receipt matching immediately")
     def test_credit_direction_skips_receipt(self):
         """U54: Credit-direction tx → (None, None) immediately, no DB call.
         Currently _try_match_receipt does not check direction; after H1 fix
@@ -629,7 +628,6 @@ class TestMatchAll:
         assert results[0].status == matcher.MATCHED
         assert results[0].matched_source == "regpayment"
 
-    @pytest.mark.xfail(reason="H1: credit tx should not match receipt (refund scenario)")
     def test_refund_tx_no_receipt_match(self):
         """U78: Refund tx (credit) where a same-amount purchase receipt exists →
         must NOT match the receipt; falls through. After H1 fix, credit
