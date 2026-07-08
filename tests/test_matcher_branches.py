@@ -121,7 +121,6 @@ class TestCheckNameSimilarity:
             )
             assert result == "uncertain"
 
-    @pytest.mark.xfail(reason="H2: compound-word substring overlap should not upgrade to uncertain after fix")
     def test_llm_no_match_compound_word_overlap_stays_no_match(self):
         """U47: LLM says 'no_match' + only compound-word (substring) overlap
         → should stay 'no_match' after H2 fix.

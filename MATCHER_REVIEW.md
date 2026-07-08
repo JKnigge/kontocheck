@@ -40,7 +40,7 @@ Each item below has an explicit status checkbox.
   via the existing definitive / uncertain / amount-mismatch paths.
 
 ### H2. Substring brand-overlap fires on compound words
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `pipeline/matcher.py:129` (`_has_brand_overlap`).
 - **Problem:** `token in desc_lower` is substring, not whole-word. Candidate
   `"Otto"` matches `"Lotto"`; `"Apo"` matches `"Apolda"` (city); `"Baur"` matches

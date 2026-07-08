@@ -128,21 +128,24 @@ _BRAND_NOISE_TOKENS = frozenset({
 def _has_brand_overlap(bank_description: str, candidate_name: str) -> bool:
     """
     Return True if any meaningful brand token (>=3 letters, not a legal-
-    entity suffix or stopword) from the candidate name appears in the bank
-    description, case-insensitive.
+    entity suffix or stopword) from the candidate name appears as a whole
+    word in the bank description, case-insensitive.
 
     Used as a safety net after the LLM verdict: receipts and regpayment
     candidates already have matching amount and date, so a single shared
     brand token (e.g. "OBI" in "OBI GmbH & Co. Deutschland KG" vs.
     "Kartenzahlung OBI.SAGT.DANKE/Hamburg/DE") is a strong signal that the
     candidate should not be silently discarded.
+
+    Both sides are tokenized so that compound-word false positives (e.g.
+    "Otto" matching "Lotto") are avoided.
     """
-    desc_lower = bank_description.lower()
-    for raw_token in re.findall(r"[A-Za-zÄÖÜäöüß]+", candidate_name):
+    desc_tokens = {t.lower() for t in re.findall(r"[A-Za-zÄÖÜäöüß0-9]+", bank_description)}
+    for raw_token in re.findall(r"[A-Za-zÄÖÜäöüß0-9]+", candidate_name):
         token = raw_token.lower()
         if len(token) < 3 or token in _BRAND_NOISE_TOKENS:
             continue
-        if token in desc_lower:
+        if token in desc_tokens:
             return True
     return False
 

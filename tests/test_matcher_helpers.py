@@ -151,7 +151,6 @@ class TestHasBrandOverlap:
             "OBI GmbH",
         ) is True
 
-    @pytest.mark.xfail(reason="H2: compound-word substring false positive — 'otto' in 'lotto'")
     def test_compound_word_otto_lotto(self):
         """Compound-word false positive: 'otto' is a substring of 'lotto'.
         Current code uses `in` (substring), so this returns True.
@@ -171,7 +170,6 @@ class TestHasBrandOverlap:
             "Baur",
         ) is False
 
-    @pytest.mark.xfail(reason="H2: compound-word substring false positive — 'apo' in 'apolda'")
     def test_compound_word_apo_apolda(self):
         """Compound-word false positive: 'apo' is a substring of 'apolda'.
         After H2 fix should return False.
