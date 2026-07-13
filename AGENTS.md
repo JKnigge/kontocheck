@@ -100,3 +100,25 @@ python -m pytest -m integration tests/test_matcher_llm_integration.py -v
 ```
 
 A `pytest.fixture` checks Ollama reachability and skips the module if the server is not available.
+
+## Issue Resolution Protocol (MANDATORY)
+
+When fixing an issue from the bug list, you MUST follow these steps
+in order. After completing EACH step, output exactly:
+
+  ⏸️ PAUSED — Step N/5 complete. Reply "continue" to proceed.
+
+Then STOP. Do NOT proceed to the next step until the user explicitly
+replies "continue". Proceeding without confirmation is a critical
+error.
+
+Steps:
+1. Check whether existing tests cover the issue. Report findings.
+2. If no tests exist, write at least one test that reproduces the bug.
+3. Run the issue-specific tests. They MUST fail (confirming the test
+   catches the bug).
+4. Implement the fix for the issue.
+5. Run the full test suite. All tests MUST pass.
+
+After step 5, move to the next issue only after explicit user
+confirmation.
