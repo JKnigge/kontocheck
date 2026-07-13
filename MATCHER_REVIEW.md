@@ -76,7 +76,7 @@ Each item below has an explicit status checkbox.
   diagonal pairing, not the off-diagonal one.
 
 ### H4. No lower bound on receipt date
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `storage/db_client.py:50` (`receipt_date <= bank_date`).
 - **Problem:** A 2024 €4.50 receipt is a candidate for a 2026 €4.50 transaction.
   Small recurring amounts collide constantly; the LLM has no temporal awareness.

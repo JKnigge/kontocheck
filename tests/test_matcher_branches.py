@@ -31,6 +31,7 @@ mock_config.OLLAMA_URL = "http://localhost:11434"
 mock_config.OLLAMA_MODEL = "test-model"
 mock_config.DATE_TIER1_DAYS = 5
 mock_config.DATE_TIER2_DAYS = 14
+mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID = 1
 sys.modules["config"] = mock_config
 
@@ -424,13 +425,12 @@ class TestTryRegpaymentAmountMismatch:
             )
         assert result is None
 
-    @pytest.mark.xfail(reason="H5: used IDs should still be considered for mismatch detection after fix")
     def test_used_id_still_considered_for_mismatch(self):
         """U66: Row already in used_regpayment_ids should still be considered for
         mismatch detection (Spotify price-hike scenario).
-        Currently the row is filtered out by `c["id"] not in used_regpayment_ids`,
-        so a previously-matched regpayment won't flag an amount mismatch for a
-        second transaction. After H5 fix, used IDs should be checked for mismatch.
+        The row should NOT be filtered out by `c["id"] not in used_regpayment_ids`
+        because AMOUNT_MISMATCH is a diagnostic about the regpayment table, not
+        a claim on the row.
         Linked: H5"""
         rp = make_regpayment(id=15, reason="Spotify", amount_cents=-1099)
         mock_db.get_regpayment_candidates_by_date.return_value = [rp]
@@ -574,11 +574,11 @@ class TestMatchAll:
         assert results[1].matched_id == 1
         assert results[1].date_gap_days == 1
 
-    @pytest.mark.xfail(reason="H4: stale-receipt date window not yet enforced")
     def test_stale_receipt_not_candidate(self):
         """U75: 2-year-old receipt of same amount must NOT be a candidate
-        after H4 (date window enforcement). Currently no date window is
-        checked beyond receipt_date ≤ bank_date.
+        after H4 (date window enforcement). Stale candidates are filtered
+        out of the candidate list before _check_name_similarity is called,
+        so the transaction falls through to NO_MATCH.
         Linked: H4"""
         old_receipt = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=730)
         mock_db.get_receipt_candidates.return_value = [old_receipt]
@@ -590,11 +590,96 @@ class TestMatchAll:
 
         assert results[0].status == matcher.NO_MATCH
 
-    @pytest.mark.xfail(reason="H5: Spotify price-hike scenario — used IDs not checked for mismatch")
+    def test_stale_receipt_filtered_before_llm_call(self):
+        """U75b: Stale receipt never reaches _check_name_similarity.
+        The matcher-layer filter must drop candidates whose receipt_date
+        is older than config.RECEIPT_DATE_WINDOW_DAYS before any LLM call.
+        Linked: H4"""
+        old_receipt = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=730)
+        mock_db.get_receipt_candidates.return_value = [old_receipt]
+        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        with patch.object(matcher, "_check_name_similarity") as mock_sim:
+            results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
+
+        assert results[0].status == matcher.NO_MATCH
+        mock_sim.assert_not_called()
+
+    def test_fresh_receipt_within_window_still_matches(self):
+        """U75c: Receipt within the date window must still match — the
+        H4 filter must not over-fire on legitimate candidates.
+        Linked: H4"""
+        fresh = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
+        mock_db.get_receipt_candidates.return_value = [fresh]
+        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
+
+        assert results[0].status == matcher.MATCHED
+        assert results[0].matched_id == 1
+
+    def test_receipt_at_window_boundary_matches(self):
+        """U75d: A receipt exactly RECEIPT_DATE_WINDOW_DAYS old is still
+        a valid candidate (boundary is inclusive). The delay status may
+        be matched_unusual_delay because the window (28d) > DATE_TIER2_DAYS
+        (14d) — the point of this test is that the candidate is NOT filtered.
+        Linked: H4"""
+        # mock_config.RECEIPT_DATE_WINDOW_DAYS == 28
+        boundary = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=28)
+        mock_db.get_receipt_candidates.return_value = [boundary]
+        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
+
+        assert results[0].matched_source == "receipt"
+        assert results[0].matched_id == 1
+
+    def test_receipt_one_day_beyond_window_filtered(self):
+        """U75e: A receipt RECEIPT_DATE_WINDOW_DAYS+1 old is filtered out.
+        Boundary is inclusive on the window side.
+        Linked: H4"""
+        stale = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=29)
+        mock_db.get_receipt_candidates.return_value = [stale]
+        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
+
+        assert results[0].status == matcher.NO_MATCH
+
+    def test_mixed_stale_and_fresh_only_fresh_considered(self):
+        """U75f: When the DB returns a stale and a fresh receipt, only the
+        fresh one reaches _check_name_similarity.
+        Linked: H4"""
+        stale = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=730)
+        fresh = make_receipt(id=2, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
+        mock_db.get_receipt_candidates.return_value = [stale, fresh]
+        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        seen_ids: list[int] = []
+
+        def fake_sim(_desc: str, _name: str) -> str:
+            return "match"
+
+        with patch.object(matcher, "_check_name_similarity", side_effect=fake_sim) as mock_sim:
+            results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
+
+        assert results[0].status == matcher.MATCHED
+        assert results[0].matched_id == 2
+        # Only the fresh receipt should have been passed to the LLM.
+        assert mock_sim.call_count == 1
+
     def test_stale_regpayment_spotify_scenario(self):
         """U76: tx A claims €10.99, tx B €11.99 → tx A MATCHED + tx B AMOUNT_MISMATCH.
-        After H5 fix, the regpayment row used for tx A should still be
-        considered for amount-mismatch detection for tx B.
+        The regpayment row used for tx A must still be considered for
+        amount-mismatch detection for tx B (diagnostic, not a claim on the row).
         Linked: H5"""
         rp = make_regpayment(id=1, reason="Spotify", amount_cents=-1099)
         mock_db.get_regpayment_candidates.return_value = [rp]

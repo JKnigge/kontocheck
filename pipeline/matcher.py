@@ -20,7 +20,7 @@ Status constants are defined at module level and used by report.py.
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -250,6 +250,19 @@ def _try_match_receipt(
 
     candidates = db_client.get_receipt_candidates(tx.amount, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_receipt_ids]
+
+    # H4: defense-in-depth — even when the SQL layer already filters stale
+    # receipts via DATE_SUB, drop any candidate whose receipt_date is older
+    # than the configured window. This keeps stale receipts from reaching
+    # _check_name_similarity (and thus the LLM) when the DB query is mocked
+    # or the window is widened at runtime.
+    window_days = getattr(config, "RECEIPT_DATE_WINDOW_DAYS", None)
+    if window_days:
+        lower_bound = tx.date - timedelta(days=window_days)
+        candidates = [
+            c for c in candidates
+            if c.get("receipt_date") is None or c["receipt_date"] >= lower_bound
+        ]
 
     if not candidates:
         return (None, None)

@@ -59,6 +59,17 @@ OUTPUT_FOLDER: Path = Path(os.getenv("OUTPUT_FOLDER", "kontocheck_reports"))
 DATE_TIER1_DAYS: int = _int("DATE_TIER1_DAYS") if os.getenv("DATE_TIER1_DAYS") else 5
 DATE_TIER2_DAYS: int = _int("DATE_TIER2_DAYS") if os.getenv("DATE_TIER2_DAYS") else 14
 
+# H4: lower bound on receipt_date for receipt candidate lookups. Receipts
+# older than this window (measured back from the bank booking date) are
+# filtered out at the SQL layer and never reach name-similarity matching.
+# Default is 2 * DATE_TIER2_DAYS (≈ 28 days) which matches the review's
+# "safe default"; override via .env if a wider/narrower window is needed.
+RECEIPT_DATE_WINDOW_DAYS: int = (
+    _int("RECEIPT_DATE_WINDOW_DAYS")
+    if os.getenv("RECEIPT_DATE_WINDOW_DAYS")
+    else 2 * (DATE_TIER2_DAYS or 14)
+)
+
 REGPAYMENT_USER_ID: int = _int("REGPAYMENT_USER_ID")
 
 
@@ -74,6 +85,7 @@ def print_config() -> None:
     print(f"  OUTPUT_FOLDER     = {OUTPUT_FOLDER}")
     print(f"  DATE_TIER1_DAYS   = {DATE_TIER1_DAYS}")
     print(f"  DATE_TIER2_DAYS   = {DATE_TIER2_DAYS}")
+    print(f"  RECEIPT_DATE_WINDOW_DAYS = {RECEIPT_DATE_WINDOW_DAYS}")
     print(f"  REGPAYMENT_USER_ID= {REGPAYMENT_USER_ID}")
 
 

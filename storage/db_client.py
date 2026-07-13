@@ -42,18 +42,31 @@ def test_connection() -> bool:
 def get_receipt_candidates(amount: Decimal, bank_date: date) -> list[dict]:
     conn = _get_connection()
     cursor = conn.cursor(dictionary=True)
+    # H4: bound receipt_date both ways so stale receipts from unrelated
+    # periods are filtered at the SQL layer. The lower bound is
+    # bank_date - RECEIPT_DATE_WINDOW_DAYS (configurable, defaults to
+    # 2 * DATE_TIER2_DAYS). The upper bound (bank_date) prevents future
+    # receipts from matching; DATE_SUB is used so the bound is computed
+    # by the DB engine and stays correct across DST/timezone edges.
     query = (
         "SELECT id, file_name, issuer, receipt_date, total_amount, "
         "confidence, manually_checked "
         "FROM receipts "
         "WHERE total_amount = %s "
         "AND receipt_date <= %s "
+        "AND receipt_date >= DATE_SUB(%s, INTERVAL %s DAY) "
         "ORDER BY receipt_date DESC"
     )
-    cursor.execute(query, (amount, bank_date))
+    cursor.execute(
+        query,
+        (amount, bank_date, bank_date, config.RECEIPT_DATE_WINDOW_DAYS),
+    )
     rows = cursor.fetchall()
     cursor.close()
-    logger.debug("Receipt candidates for amount=%s, bank_date=%s: %d rows", amount, bank_date, len(rows))
+    logger.debug(
+        "Receipt candidates for amount=%s, bank_date=%s, window=%d days: %d rows",
+        amount, bank_date, config.RECEIPT_DATE_WINDOW_DAYS, len(rows),
+    )
     return rows
 
 
