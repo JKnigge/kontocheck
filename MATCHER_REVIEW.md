@@ -90,7 +90,7 @@ Each item below has an explicit status checkbox.
   layer and never reach `_check_name_similarity`.
 
 ### H5. Amount-mismatch detection blocked by `used_regpayment_ids`
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `pipeline/matcher.py:369` (filter in `_try_regpayment_amount_mismatch`).
 - **Problem:** Tx A (Spotify €10.99) claims the regpayment row definitively.
   Tx B (Spotify €11.99 after price hike) hits `_try_regpayment_amount_mismatch`,

@@ -400,9 +400,15 @@ def _try_regpayment_amount_mismatch(
 
     This handles the case where a regular payment has changed its amount
     and the regpayment table hasn't been updated yet.
+
+    H5: AMOUNT_MISMATCH is a *diagnostic about the regpayment table*, not a
+    claim on a row. The 1-to-1 constraint enforced by `used_regpayment_ids`
+    does NOT apply here — a row already claimed definitively by an earlier
+    transaction must still surface a stale-amount warning for a later one.
+    `used_regpayment_ids` is accepted for signature stability but
+    intentionally ignored; no rows are added to it either.
     """
-    all_candidates = db_client.get_regpayment_candidates_by_date(tx.date)
-    candidates = [c for c in all_candidates if c["id"] not in used_regpayment_ids]
+    candidates = db_client.get_regpayment_candidates_by_date(tx.date)
 
     if not candidates:
         return None
@@ -414,7 +420,6 @@ def _try_regpayment_amount_mismatch(
         similarity = _check_name_similarity(tx.description, reason)
 
         if similarity == "match":
-            used_regpayment_ids.add(c["id"])
             return _build_regpayment_result(
                 tx, c,
                 uncertain=False, amount_mismatch=True,
@@ -424,7 +429,6 @@ def _try_regpayment_amount_mismatch(
             uncertain_fallback = c
 
     if uncertain_fallback is not None:
-        used_regpayment_ids.add(uncertain_fallback["id"])
         return _build_regpayment_result(
             tx, uncertain_fallback,
             uncertain=True, amount_mismatch=True,
