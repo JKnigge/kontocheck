@@ -4,8 +4,23 @@ This file provides guidance to AI agents working with code in this repository.
 
 ## Common commands
 
+> **Running Python / pytest:** The project's dependencies (pytest, pdfplumber,
+> ollama, …) live in the `.venv` virtualenv — the system Python does **not**
+> have them. Always invoke the venv's interpreter directly rather than relying
+> on `python` from `PATH` or activating the venv (activation does not persist
+> across shell invocations in some agent environments):
+> - **Windows (bash):** `.venv/Scripts/python.exe`  *(use forward slashes — backslashes get mangled by bash)*
+> - **Windows (cmd/PowerShell):** `.venv\Scripts\python.exe`
+> - **POSIX:** `.venv/bin/python`
+>
+> If in doubt, locate the interpreter first:
+> `glob .venv/**/python*` (or `python3*` on POSIX).
+>
+> Examples below use the bare `python` for brevity — substitute the venv
+> interpreter path as appropriate for your environment.
+
 ```bash
-# Activate the venv (Windows)
+# Activate the venv (Windows) — optional, only works in an interactive shell
 .venv\Scripts\activate
 
 # Run the tool end-to-end against a statement PDF
