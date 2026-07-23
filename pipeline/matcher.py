@@ -152,22 +152,35 @@ def _has_brand_overlap(bank_description: str, candidate_name: str) -> bool:
 
 
 def _build_similarity_prompt(bank_description: str, candidate_name: str) -> str:
-    """Build the LLM prompt for name-similarity verification."""
+    """Build the LLM prompt for name-similarity verification.
+
+    The prompt explicitly defines the 'uncertain' verdict (M9) so the model
+    does not collapse to a binary match/no_match decision, and includes
+    German few-shot examples that small models weight heavily.
+    """
     return (
         f'Bank statement description: "{bank_description}"\n'
         f'Candidate name: "{candidate_name}"\n\n'
-        f'A bank statement transaction has already been matched by amount '
-        f'and date to a candidate from our records. Your job is to verify '
-        f'whether they refer to the same entity.\n\n'
-        f'Bank statement descriptions typically contain only a shop or brand '
-        f'name, often mangled with city names, terminal IDs, payment-method '
-        f'prefixes ("Kartenzahlung"), or marketing slogans (e.g. '
-        f'"OBI.SAGT.DANKE/Hamburg/DE"). Our records may hold the full legal '
-        f'entity name (e.g. "OBI GmbH & Co. Deutschland KG"). A shared '
-        f'distinctive brand token is sufficient to count as a match — you '
-        f'do not need an exact string equality. Reply "no_match" only when '
-        f'the names clearly refer to different entities.\n\n'
-        f'You MUST reply with EXACTLY ONE word: "match", "no_match", or "uncertain".'
+        f'These two strings were already matched by amount and date. Decide '
+        f'whether they refer to the same merchant/payee.\n\n'
+        f'German bank descriptions are mangled (e.g. '
+        f'"Kartenzahlung OBI.SAGT.DANKE/Hamburg/DE" for "OBI GmbH & Co. '
+        f'Deutschland KG"). Ignore legal suffixes (GmbH, AG, KG), cities, '
+        f'terminal IDs, and payment prefixes.\n\n'
+        f'Rules:\n'
+        f'- match: a distinctive brand/name token clearly identifies the '
+        f'same entity.\n'
+        f'- no_match: names clearly refer to different entities.\n'
+        f'- uncertain: description is too truncated or abbreviated to '
+        f'decide, OR only a generic token overlaps (e.g. "Stadtwerke", '
+        f'"Apotheke", "Tankstelle").\n\n'
+        f'Examples:\n'
+        f'  "EDEKA SAGT DANKE//BERLIN" vs "EDEKA Müller oHG" -> match\n'
+        f'  "Kartenzahlung Stadtwerke Hamburg" vs "Stadtwerke München AG" '
+        f'-> no_match\n'
+        f'  "POS 4711 //DE" vs "OBI Bau- und Heimwerkermärkte" -> uncertain\n\n'
+        f'Answer with exactly one lowercase word and nothing else: match, '
+        f'no_match, or uncertain.'
     )
 
 

@@ -302,24 +302,21 @@ class TestBuildSimilarityPrompt:
         assert "OBI GmbH & Co. Deutschland KG" in sample_prompt
 
     def test_output_contract_last_line(self, sample_prompt):
-        """The output contract line (You MUST reply...) should be the
-        LAST non-empty line of the prompt, so the LLM's last seen context
-        is the instruction on how to respond.
-        Currently the data (Bank statement / Candidate name) comes after
-        the contract, so the last line is data — the M6 fix should move
-        the contract to the end.
-        Linked: M6"""
+        """The output contract line (the 'Answer with exactly one…' line)
+        should be the LAST non-empty line of the prompt, so the LLM's last
+        seen context is the instruction on how to respond.
+        Linked: M6, M9"""
         non_empty = [line for line in sample_prompt.split("\n") if line.strip()]
         last_line = non_empty[-1]
-        assert 'You MUST reply' in last_line, (
+        assert 'Answer with exactly one lowercase word' in last_line, (
             f"Expected contract line as last non-empty line, got: {last_line!r}"
         )
 
     def test_newline_separates_contract_and_data(self, sample_prompt):
         """At least one blank line (\\n\\n) must separate the output
         contract instruction from the bank/candidate data.
-        Linked: M6"""
-        contract_anchor = 'or "uncertain".'
+        Linked: M6, M9"""
+        contract_anchor = 'or uncertain.'
         data_anchor = "Bank statement description:"
         idx_contract = sample_prompt.find(contract_anchor)
         idx_data = sample_prompt.find(data_anchor)
@@ -334,6 +331,6 @@ class TestBuildSimilarityPrompt:
         )
 
     def test_contains_verdict_tokens(self, sample_prompt):
-        assert '"match"' in sample_prompt
-        assert '"no_match"' in sample_prompt
-        assert '"uncertain"' in sample_prompt
+        assert "match" in sample_prompt
+        assert "no_match" in sample_prompt
+        assert "uncertain" in sample_prompt

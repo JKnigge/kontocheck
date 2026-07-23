@@ -149,7 +149,7 @@ Each item below has an explicit status checkbox.
   on existing test fixtures unchanged.
 
 ### M9. `uncertain` is undefined for the model
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `pipeline/matcher.py:151-166` (prompt body).
 - **Problem:** Three-state contract but no criteria for picking `uncertain` vs
   `no_match`. Model collapses to binary in practice.
