@@ -12,23 +12,30 @@ This file provides guidance to AI agents working with code in this repository.
 python kontocheck.py path/to/statement.pdf
 python kontocheck.py path/to/statement.pdf --log-level DEBUG   # prints LLM name-similarity verdicts
 
-# Tests — full suite
-python -m pytest tests/
+# ── pytest modules (proper pytest, mock DB + Ollama) ──────────────────
+# Run ALL pytest modules together (safe — only collects pytest-style files):
+python -m pytest tests/test_matcher_helpers.py tests/test_matcher_branches.py tests/test_matcher_llm_integration.py tests/test_db_client_queries.py
 
-# Tests — individual modules
-python -m pytest tests/test_step4_matcher.py            # baseline regression (12 manual checks + script mode)
+# Individual pytest modules:
 python -m pytest tests/test_matcher_helpers.py          # pure helper unit tests (U1–U41)
 python -m pytest tests/test_matcher_branches.py         # branch logic unit tests (U42–U79)
+python -m pytest tests/test_db_client_queries.py        # db_client SQL construction (mocked connection)
 python -m pytest tests/test_matcher_llm_integration.py  # real-LLM integration tests (I1–I5), skipped by default
+
+# Run with xfail details to see which expected-fail tests map to which defect
+python -m pytest tests/test_matcher_helpers.py tests/test_matcher_branches.py -v --tb=short
 
 # Integration tests (require a running Ollama instance with model from .env)
 python -m pytest -m integration tests/test_matcher_llm_integration.py -v
 
-# Legacy script-mode test (not a pytest module — runs as standalone script)
-python tests/test_step4_matcher.py
-
-# Run with xfail details to see which expected-fail tests map to which defect
-python -m pytest tests/test_matcher_helpers.py tests/test_matcher_branches.py -v --tb=short
+# ── Legacy script-mode tests (NOT pytest modules — run as standalone scripts) ──
+# These call sys.exit() at module load and CRASH if collected by pytest.
+# NEVER run `python -m pytest tests/` — it will hit sys.exit() during collection.
+python tests/test_step4_matcher.py                       # baseline matcher regression (12 manual checks)
+python tests/test_step5_report.py                        # report rendering regression (37 manual checks)
+python tests/test_step1_config.py                        # config.py loading (requires real .env)
+python tests/test_step2_db_client.py                     # db_client live queries (requires real DB)
+python tests/test_step3_extractor.py path/to/statement.pdf  # extractor end-to-end (requires Ollama + PDF)
 ```
 
 There is no lint/format config in the repo. Dependencies: `pdfplumber`, `ollama`, `mysql-connector-python`, `python-dotenv`.
@@ -62,11 +69,16 @@ The `Design Docs/` folder (PRD.md, TECHNICAL_SPEC.md, IMPLEMENTATION_PLAN.md) is
 
 | File | Purpose | Runs without DB/Ollama? |
 |---|---|---|
-| `tests/test_step4_matcher.py` | Baseline regression (12 manual checks). Also runnable as standalone script. | Yes — mocks config, ollama, db_client |
-| `tests/_helpers.py` | Shared fixtures: `Transaction`, `make_receipt`, `make_regpayment`, `make_tx` | N/A |
 | `tests/test_matcher_helpers.py` | Pure helper unit tests (U1–U41): `_to_signed_cents`, `_strip_thinking`, `_has_brand_overlap`, `_compute_date_gap`, `_assign_delay_status`, `_parse_verdict`, `_build_similarity_prompt` | Yes — mocks config, ollama, db_client |
 | `tests/test_matcher_branches.py` | Branch logic unit tests (U42–U79): `_check_name_similarity`, `_try_match_receipt`, `_try_match_regpayment`, `_try_regpayment_amount_mismatch`, `match_all` | Yes — mocks config, ollama, db_client |
+| `tests/test_db_client_queries.py` | `db_client` SQL construction (mocked connection). Asserts H4 lower bound on `receipt_date` and existing ORDER BY / upper bound. | Yes — mocks mysql.connector.connect |
 | `tests/test_matcher_llm_integration.py` | Real-LLM integration tests (I1–I5). Reads `OLLAMA_URL` and `OLLAMA_MODEL` from `.env`. Skipped unless run with `-m integration`. | **No** — requires running Ollama with the configured model |
+| `tests/_helpers.py` | Shared fixtures: `Transaction`, `make_receipt`, `make_regpayment`, `make_tx` | N/A |
+| `tests/test_step4_matcher.py` | **Legacy script-mode** (NOT a pytest module). Baseline matcher regression (41 manual checks). Calls `sys.exit()` at module load. | Yes — mocks config, ollama, db_client |
+| `tests/test_step5_report.py` | **Legacy script-mode** (NOT a pytest module). Report rendering regression (37 manual checks). Calls `sys.exit()` at module load. | Yes — synthetic MatchResults |
+| `tests/test_step1_config.py` | **Legacy script-mode**. `config.py` loading via real `.env`. Calls `sys.exit(1)` on missing `.env`. | **No** — requires real `.env` |
+| `tests/test_step2_db_client.py` | **Legacy script-mode**. `db_client` live queries. Calls `sys.exit(1)` on missing DB. | **No** — requires real DB |
+| `tests/test_step3_extractor.py` | **Legacy script-mode**. Extractor end-to-end against a PDF. Calls `sys.exit(1)` on missing PDF / Ollama. | **No** — requires Ollama + PDF |
 
 ### Mock pattern
 
@@ -76,7 +88,7 @@ All unit tests mock `config`, `ollama.Client`, and `storage.db_client` at import
 
 Tests marked `@pytest.mark.xfail` encode known defects from `MATCHER_REVIEW.md`. Each xfail test has a `reason` string referencing the defect ID (e.g. `M7`, `H2`, `L13`). When a fix lands, the corresponding xfail test should flip to passing. **Do not remove xfail markers** unless the underlying defect has been fixed in `pipeline/matcher.py`.
 
-Current xfail map (21 tests):
+Current xfail map (19 tests):
 
 | Defect | Tests | Issue |
 |---|---|---|
@@ -86,9 +98,8 @@ Current xfail map (21 tests):
 | H1 | 2 (U54, U78) | Credit-direction transactions should skip receipt matching |
 | H3 | 2 (U55, U74) | No smallest-gap tiebreak for receipt candidates |
 | H4 | 1 (U75) | No date window to reject stale receipts |
-| H5 | 2 (U66, U76) | Used regpayment IDs not checked for amount-mismatch detection |
 | L12 | 2 (U56, U62) | Empty issuer/reason candidates should be skipped before LLM call |
-| L13 | 1 (U9) | `_strip_thinking` doesn't handle unclosed `<think>` tags |
+| L13 | 1 (U9) | `_strip_thinking` doesn't handle unclosed `мот` tags |
 | L15 | 1 (U19) | Payment-method noise tokens like "Kartenzahlung" not excluded from brand overlap |
 
 ### Integration tests
