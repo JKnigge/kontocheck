@@ -131,7 +131,7 @@ Each item below has an explicit status checkbox.
   produce the correct verdict.
 
 ### M8. Sampling budget wildly oversized for a one-word answer
-- [ ] **Status:** open
+- [~] **Status:** skipped (intentionally not implemented — do not pick up)
 - **Where:** `pipeline/matcher.py:171`.
 - **Problem:** `num_predict=8000`, `num_ctx=32768` for a one-word verdict.
   Reasoning models can run away into a long `<think>` block on the latency tail.
