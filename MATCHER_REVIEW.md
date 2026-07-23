@@ -108,7 +108,7 @@ Each item below has an explicit status checkbox.
 ## MED — prompt & LLM-call quality
 
 ### M6. Prompt has no separator between output contract and data
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `pipeline/matcher.py:163` → `:164`.
 - **Problem:** String ends `"…uncertain".` and runs straight into
   `Bank statement description:` with no whitespace.

@@ -153,6 +153,8 @@ def _has_brand_overlap(bank_description: str, candidate_name: str) -> bool:
 def _build_similarity_prompt(bank_description: str, candidate_name: str) -> str:
     """Build the LLM prompt for name-similarity verification."""
     return (
+        f'Bank statement description: "{bank_description}"\n'
+        f'Candidate name: "{candidate_name}"\n\n'
         f'A bank statement transaction has already been matched by amount '
         f'and date to a candidate from our records. Your job is to verify '
         f'whether they refer to the same entity.\n\n'
@@ -165,8 +167,6 @@ def _build_similarity_prompt(bank_description: str, candidate_name: str) -> str:
         f'do not need an exact string equality. Reply "no_match" only when '
         f'the names clearly refer to different entities.\n\n'
         f'You MUST reply with EXACTLY ONE word: "match", "no_match", or "uncertain".'
-        f'Bank statement description: "{bank_description}"\n'
-        f'Candidate name: "{candidate_name}"\n\n'
     )
 
 

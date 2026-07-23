@@ -103,12 +103,11 @@ All unit tests mock `config`, `ollama.Client`, and `storage.db_client` at import
 
 Tests marked `@pytest.mark.xfail` encode known defects from `MATCHER_REVIEW.md`. Each xfail test has a `reason` string referencing the defect ID (e.g. `M7`, `H2`, `L13`). When a fix lands, the corresponding xfail test should flip to passing. **Do not remove xfail markers** unless the underlying defect has been fixed in `pipeline/matcher.py`.
 
-Current xfail map (19 tests):
+Current xfail map (17 tests):
 
 | Defect | Tests | Issue |
 |---|---|---|
 | M7 | 5 (U31–U35) | `_parse_verdict` doesn't strip punctuation/markdown/quotes, only checks first word |
-| M6 | 2 (U39–U40) | `_build_similarity_prompt` has no separator between contract and data; contract not last line |
 | H2 | 3 (U16, U18, U47) | `_has_brand_overlap` uses substring `in` check, causing compound-word false positives |
 | H1 | 2 (U54, U78) | Credit-direction transactions should skip receipt matching |
 | H3 | 2 (U55, U74) | No smallest-gap tiebreak for receipt candidates |

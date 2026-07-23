@@ -306,7 +306,6 @@ class TestBuildSimilarityPrompt:
         assert "Kartenzahlung OBI SAGT DANKE" in sample_prompt
         assert "OBI GmbH & Co. Deutschland KG" in sample_prompt
 
-    @pytest.mark.xfail(reason="M6: output contract line should be the last line (after data), currently before data")
     def test_output_contract_last_line(self, sample_prompt):
         """The output contract line (You MUST reply...) should be the
         LAST non-empty line of the prompt, so the LLM's last seen context
@@ -321,18 +320,19 @@ class TestBuildSimilarityPrompt:
             f"Expected contract line as last non-empty line, got: {last_line!r}"
         )
 
-    @pytest.mark.xfail(reason="M6: no blank line between output contract and data fields")
     def test_newline_separates_contract_and_data(self, sample_prompt):
         """At least one blank line (\\n\\n) must separate the output
         contract instruction from the bank/candidate data.
-        Current prompt concatenates them without a blank separator.
         Linked: M6"""
-        contract_ending = 'or "uncertain".'
-        data_beginning = "Bank statement description:"
-        idx_contract = sample_prompt.find(contract_ending)
-        idx_data = sample_prompt.find(data_beginning)
+        contract_anchor = 'or "uncertain".'
+        data_anchor = "Bank statement description:"
+        idx_contract = sample_prompt.find(contract_anchor)
+        idx_data = sample_prompt.find(data_anchor)
         assert idx_contract != -1 and idx_data != -1
-        between = sample_prompt[idx_contract + len(contract_ending):idx_data]
+        if idx_data < idx_contract:
+            between = sample_prompt[idx_data + len(data_anchor):idx_contract]
+        else:
+            between = sample_prompt[idx_contract + len(contract_anchor):idx_data]
         assert "\n\n" in between, (
             f"Expected at least one blank line between contract and data, "
             f"got between: {between!r}"
