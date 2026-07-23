@@ -184,7 +184,7 @@ Each item below has an explicit status checkbox.
   collision, truncated POS, clean EDEKA), the verdicts match the labels.
 
 ### M10. Pre-LLM cheap signals
-- [ ] **Status:** open
+- [-] **Status:** skipped (intentionally not implemented — do not pick up)
 - **Where:** `pipeline/matcher.py:134` (`_check_name_similarity`).
 - **Problem:** Each candidate is one LLM call; 5 receipts + 3 regpayments per
   transaction = 8 calls. Most are easy decisions.
@@ -196,6 +196,14 @@ Each item below has an explicit status checkbox.
   ```
   Jaro-Winkler is ~5 lines of Python or `from rapidfuzz import fuzz`. Decision
   needed: take the rapidfuzz dependency or roll it inline.
+- **Rationale for skipping:** The LLM was introduced precisely for semantic
+  matching of names that share no tokens (e.g. "Systemgastronomie Müller" →
+  "McDonald's"). Any token-overlap or Jaro-Winkler short-circuit would skip
+  exactly those cases, defeating the LLM's purpose. Candidate sets are already
+  small because `_try_match_receipt` / `_try_match_regpayment` pre-filter by
+  exact amount + date, so the per-transaction LLM call count is bounded (≈1–8).
+  The risk of false negatives from a heuristic short-circuit outweighs the
+  marginal latency savings.
 - **Eval criterion:** LLM call count on a representative statement drops by
   ≥50% without changing the final per-transaction status distribution.
 
