@@ -102,11 +102,12 @@ def _parse_verdict(text: str) -> str:
     """Return 'match' | 'no_match' | 'uncertain' from a raw LLM reply.
 
     Defaults to 'no_match' when no recognisable verdict is found.
+    Scans the whole reply for the first occurrence of any known verdict
+    keyword, so malformed outputs (punctuation, markdown, quotes, or a
+    verdict embedded in a sentence) are still classified correctly.
     """
-    cleaned = text.strip().lower()
-    if not cleaned:
-        return "no_match"
-    first_word = cleaned.split()[0]
+    tokens = re.findall(r"[a-z_]+", text.lower())
+    first_word = next((t for t in tokens if t in {"match", "no_match", "uncertain"}), "")
     if first_word == "match":
         return "match"
     if first_word == "uncertain":

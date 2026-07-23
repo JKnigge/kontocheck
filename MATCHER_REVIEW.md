@@ -118,7 +118,7 @@ Each item below has an explicit status checkbox.
   a final "Answer with exactly one lowercase word…" line.
 
 ### M7. Verdict parser is fragile
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `pipeline/matcher.py:175`.
 - **Problem:** `content.strip().lower().split()[0]` misclassifies `"match."`,
   `"**match**"`, `'"match"'`, `"The answer is match"` as `no_match`.

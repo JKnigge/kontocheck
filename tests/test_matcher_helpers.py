@@ -240,35 +240,30 @@ class TestParseVerdict:
     def test_plain_uncertain(self):
         assert matcher._parse_verdict("uncertain") == "uncertain"
 
-    @pytest.mark.xfail(reason="M7: _parse_verdict doesn't strip punctuation from first word")
     def test_match_with_period(self):
         """'match.' — first word is 'match.' which != 'match'.
         After M7 fix, punctuation should be stripped.
         Linked: M7"""
         assert matcher._parse_verdict("match.") == "match"
 
-    @pytest.mark.xfail(reason="M7: _parse_verdict doesn't strip markdown formatting")
     def test_match_with_markdown_bold(self):
         """'**match**' — first word is '**match**' which != 'match'.
         After M7 fix, markdown formatting should be stripped.
         Linked: M7"""
         assert matcher._parse_verdict("**match**") == "match"
 
-    @pytest.mark.xfail(reason="M7: _parse_verdict doesn't strip quotes from first word")
     def test_match_with_quotes(self):
         """'"match"' — first word is '"match"' which != 'match'.
         After M7 fix, quotes should be stripped.
         Linked: M7"""
         assert matcher._parse_verdict('"match"') == "match"
 
-    @pytest.mark.xfail(reason="M7: _parse_verdict only checks first word, not full text")
     def test_match_in_sentence(self):
         """'The answer is match' — first word is 'the' which != 'match'.
         After M7 fix, the verdict should be found anywhere in the text.
         Linked: M7"""
         assert matcher._parse_verdict("The answer is match") == "match"
 
-    @pytest.mark.xfail(reason="M7: _parse_verdict only checks first word; verdict in sentence not detected")
     def test_verdict_in_sentence(self):
         """'Sure! uncertain' — first word is 'sure!' which != 'uncertain'.
         Currently returns 'no_match' by default (wrong). After M7 fix,
