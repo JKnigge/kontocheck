@@ -212,9 +212,9 @@ Each item below has an explicit status checkbox.
 ## LOW — hygiene
 
 ### L11. Silent set mutation in `_build_*` helpers
-- [ ] **Status:** open
-- **Where:** `pipeline/matcher.py:268, 341` (`used_*.add(c["id"])` inside
-  functions named `_build_…`).
+- [x] **Status:** done
+- **Where:** `pipeline/matcher.py:291` (`_try_match_receipt`),
+  `pipeline/matcher.py:362` (`_try_match_regpayment`).
 - **Fix:** Rename to `_commit_receipt_result` / `_commit_regpayment_result`,
   OR split into a pure `_build_…` + explicit `used_*.add(...)` at the call site.
 

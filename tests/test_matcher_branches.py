@@ -155,7 +155,9 @@ class TestTryMatchReceipt:
         assert result is None and unc is None
 
     def test_one_match_candidate(self):
-        """U49: One match candidate → definitive MatchResult, id added to used_receipt_ids."""
+        """U49: One match candidate → definitive MatchResult returned.
+        L11: _try_match_receipt must NOT mutate used_receipt_ids — the
+        commit is the caller's responsibility (match_all)."""
         r = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
         mock_db.get_receipt_candidates.return_value = [r]
         used = set()
@@ -166,7 +168,7 @@ class TestTryMatchReceipt:
         assert result is not None
         assert result.matched_source == "receipt"
         assert result.matched_id == 1
-        assert 1 in used
+        assert 1 not in used
         assert unc is None
 
     def test_one_uncertain_candidate(self):
@@ -197,7 +199,8 @@ class TestTryMatchReceipt:
         assert result.matched_id == 11
 
     def test_mix_uncertain_then_match(self):
-        """U52: [uncertain, match] in order → match wins, uncertain dropped."""
+        """U52: [uncertain, match] in order → match wins, uncertain dropped.
+        L11: helper must not mutate used_receipt_ids — only the caller commits."""
         r_unc = make_receipt(id=20, issuer="Unbekannt", amount=50.00, days_before_bank=2)
         r_match = make_receipt(id=21, issuer="EDEKA", amount=50.00, days_before_bank=1)
         mock_db.get_receipt_candidates.return_value = [r_unc, r_match]
@@ -215,11 +218,11 @@ class TestTryMatchReceipt:
         assert result is not None
         assert result.matched_id == 21
         assert unc is None
-        assert 21 in used
-        assert 20 not in used
+        assert used == set()
 
     def test_two_match_candidates_first_wins(self):
-        """U53: [match1, match2] → first match wins (lock in current behaviour)."""
+        """U53: [match1, match2] → first match wins (lock in current behaviour).
+        L11: helper must not mutate used_receipt_ids — only the caller commits."""
         r1 = make_receipt(id=30, issuer="REWE", amount=30.00, days_before_bank=1)
         r2 = make_receipt(id=31, issuer="REWE Filiale", amount=30.00, days_before_bank=2)
         mock_db.get_receipt_candidates.return_value = [r1, r2]
@@ -230,8 +233,7 @@ class TestTryMatchReceipt:
             )
         assert result is not None
         assert result.matched_id == 30
-        assert 30 in used
-        assert 31 not in used
+        assert used == set()
 
     def test_credit_direction_skips_receipt(self):
         """U54: Credit-direction tx → (None, None) immediately, no DB call.
@@ -303,7 +305,9 @@ class TestTryMatchRegpayment:
         assert result is None and unc is None
 
     def test_one_match(self):
-        """U58: One match → definitive result, id committed."""
+        """U58: One match → definitive result returned.
+        L11: _try_match_regpayment must NOT mutate used_regpayment_ids —
+        the commit is the caller's responsibility (match_all)."""
         rp = make_regpayment(id=10, reason="Miete", amount_cents=-95000)
         mock_db.get_regpayment_candidates.return_value = [rp]
         used = set()
@@ -314,7 +318,7 @@ class TestTryMatchRegpayment:
         assert result is not None
         assert result.matched_source == "regpayment"
         assert result.matched_id == 10
-        assert 10 in used
+        assert 10 not in used
         assert unc is None
 
     def test_one_uncertain(self):
@@ -748,3 +752,89 @@ class TestMatchAll:
         results = matcher.match_all(txs)
         assert len(results) == 3
         assert all(r.status == matcher.NO_MATCH for r in results)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L11 — _try_match_* helpers must not mutate used_* sets  (U80–U83)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestL11PureHelpers:
+    """L11: _try_match_receipt / _try_match_regpayment must be pure — they
+    must not silently mutate the passed-in used_*_ids set. The 1-to-1
+    commit must happen at the match_all call site so a "preview" build is
+    possible without side effects."""
+
+    def test_try_match_receipt_does_not_mutate_used_on_definitive(self):
+        """U80: A definitive receipt match must NOT add the id to
+        used_receipt_ids. The caller (match_all) is responsible for
+        committing.
+        Linked: L11"""
+        r = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
+        mock_db.get_receipt_candidates.return_value = [r]
+        used = set()
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            result, unc = matcher._try_match_receipt(
+                make_tx("REWE SAGT DANKE", 43.20), used
+            )
+        assert result is not None
+        assert result.matched_id == 1
+        assert used == set()
+
+    def test_try_match_regpayment_does_not_mutate_used_on_definitive(self):
+        """U81: A definitive regpayment match must NOT add the id to
+        used_regpayment_ids. The caller (match_all) is responsible for
+        committing.
+        Linked: L11"""
+        rp = make_regpayment(id=10, reason="Miete", amount_cents=-95000)
+        mock_db.get_regpayment_candidates.return_value = [rp]
+        used = set()
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            result, unc = matcher._try_match_regpayment(
+                make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit"),
+                -95000, used,
+            )
+        assert result is not None
+        assert result.matched_id == 10
+        assert used == set()
+
+    def test_match_all_commits_receipt_id_at_call_site(self):
+        """U82: match_all commits the matched receipt id to its internal
+        used_receipt_ids set so the 1-to-1 constraint is still enforced
+        across transactions.
+        Linked: L11"""
+        receipt = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
+        mock_db.get_receipt_candidates.return_value = [receipt]
+        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        tx1 = make_tx("REWE SAGT DANKE", 43.20, tx_date=date(2024, 4, 15))
+        tx2 = make_tx("REWE MARKT 12345", 43.20, tx_date=date(2024, 4, 16))
+
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            results = matcher.match_all([tx1, tx2])
+
+        assert results[0].status == matcher.MATCHED
+        assert results[0].matched_id == 1
+        assert results[1].status == matcher.NO_MATCH
+
+    def test_match_all_commits_regpayment_id_at_call_site(self):
+        """U83: match_all commits the matched regpayment id to its internal
+        used_regpayment_ids set so the 1-to-1 constraint is still enforced
+        across transactions.
+        Linked: L11"""
+        rp = make_regpayment(id=10, reason="Miete", amount_cents=-95000)
+        mock_db.get_receipt_candidates.return_value = []
+        mock_db.get_regpayment_candidates.return_value = [rp]
+        mock_db.get_regpayment_candidates_by_date.return_value = []
+
+        tx1 = make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit",
+                      tx_date=date(2024, 4, 15))
+        tx2 = make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit",
+                      tx_date=date(2024, 4, 16))
+
+        with patch.object(matcher, "_check_name_similarity", return_value="match"):
+            results = matcher.match_all([tx1, tx2])
+
+        assert results[0].status == matcher.MATCHED
+        assert results[0].matched_id == 10
+        assert results[1].status == matcher.NO_MATCH

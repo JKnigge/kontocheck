@@ -252,8 +252,9 @@ def _try_match_receipt(
 
     Returns a tuple (definitive_result, uncertain_candidate):
       - If a candidate's name similarity is "match": the first such candidate
-        is built into a MatchResult (which also commits the id to
-        used_receipt_ids) and returned as definitive_result.
+        is built into a MatchResult and returned as definitive_result. The
+        caller is responsible for committing the id to used_receipt_ids
+        (L11 — no silent set mutation inside this helper).
       - Otherwise the first "uncertain" candidate (if any) is returned as
         uncertain_candidate WITHOUT being committed. The caller decides
         whether to fall back to it after checking regpayment for a
@@ -288,7 +289,6 @@ def _try_match_receipt(
         similarity = _check_name_similarity(tx.description, issuer)
 
         if similarity == "match":
-            used_receipt_ids.add(c["id"])
             return (_build_receipt_result(tx, c, uncertain=False), None)
 
         if similarity == "uncertain" and uncertain_fallback is None:
@@ -342,9 +342,11 @@ def _try_match_regpayment(
 
     Returns a tuple (definitive_result, uncertain_candidate) following the
     same contract as _try_match_receipt: a definitive "match" is built and
-    committed immediately; an "uncertain" candidate is returned uncommitted
-    so the caller can prefer it only after both sources have failed to
-    produce a definitive match.
+    returned; the caller is responsible for committing the id to
+    used_regpayment_ids (L11 — no silent set mutation inside this helper).
+    An "uncertain" candidate is returned uncommitted so the caller can
+    prefer it only after both sources have failed to produce a definitive
+    match.
     """
     candidates = db_client.get_regpayment_candidates(signed_cents, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_regpayment_ids]
@@ -359,7 +361,6 @@ def _try_match_regpayment(
         similarity = _check_name_similarity(tx.description, reason)
 
         if similarity == "match":
-            used_regpayment_ids.add(c["id"])
             return (_build_regpayment_result(tx, c, uncertain=False), None)
 
         if similarity == "uncertain" and uncertain_fallback is None:
@@ -477,12 +478,16 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
         # more likely to have a receipt than to be a regular payment.
         receipt_def, receipt_unc = _try_match_receipt(tx, used_receipt_ids)
         if receipt_def is not None:
+            assert receipt_def.matched_id is not None
+            used_receipt_ids.add(receipt_def.matched_id)
             result = receipt_def
         else:
             regpay_def, regpay_unc = _try_match_regpayment(
                 tx, signed_cents, used_regpayment_ids,
             )
             if regpay_def is not None:
+                assert regpay_def.matched_id is not None
+                used_regpayment_ids.add(regpay_def.matched_id)
                 result = regpay_def
             elif receipt_unc is not None:
                 used_receipt_ids.add(receipt_unc["id"])
