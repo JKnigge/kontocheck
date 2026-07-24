@@ -123,6 +123,11 @@ _BRAND_NOISE_TOKENS = frozenset({
     "co", "company", "ltd", "llc", "inc", "corp",
     "deutschland", "germany", "international",
     "und", "and", "der", "die", "das", "the", "von",
+    "kartenzahlung", "lastschrift", "basislastschrift", "sepa",
+    "ueberweisung", "gutschrift", "dauerauftrag", "paypal",
+    "danke", "sagt", "zahlung", "betrag", "auftrag",
+    "bank", "konto", "card", "pos", "terminal",
+    "dee", "deu", "mit", "fuer", "bei", "auf",
 })
 
 

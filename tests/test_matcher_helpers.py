@@ -179,7 +179,6 @@ class TestHasBrandOverlap:
             "Apo",
         ) is False
 
-    @pytest.mark.xfail(reason="L15: payment-method noise tokens like 'Kartenzahlung' not excluded")
     def test_expanded_noise_kartenzahlung(self):
         """Payment-method tokens like 'Kartenzahlung' should not count as
         brand overlap. After L15 fix they should be excluded.

@@ -241,7 +241,7 @@ Each item below has an explicit status checkbox.
 - **Fix:** `for i, tx in enumerate(sorted(transactions, key=lambda t: t.date), 1):`
 
 ### L15. Expand `_BRAND_NOISE_TOKENS` with bank-statement vocabulary
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `pipeline/matcher.py:104-109`.
 - **Fix:** Add: `kartenzahlung`, `lastschrift`, `basislastschrift`, `sepa`,
   `überweisung`, `gutschrift`, `dauerauftrag`, `paypal`, `danke`, `sagt`,
