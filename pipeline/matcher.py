@@ -266,6 +266,13 @@ def _try_match_receipt(
     candidates = db_client.get_receipt_candidates(tx.amount, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_receipt_ids]
 
+    # L12: defense-in-depth — even when the SQL layer already filters empty
+    # issuers via `issuer IS NOT NULL AND issuer <> ''`, drop any candidate
+    # whose issuer is missing here too. This keeps pointless LLM calls from
+    # being made when the DB query is mocked or rows slip through with
+    # whitespace-only issuers.
+    candidates = [c for c in candidates if (c.get("issuer") or "").strip()]
+
     # H4: defense-in-depth — even when the SQL layer already filters stale
     # receipts via DATE_SUB, drop any candidate whose receipt_date is older
     # than the configured window. This keeps stale receipts from reaching
@@ -351,6 +358,10 @@ def _try_match_regpayment(
     candidates = db_client.get_regpayment_candidates(signed_cents, tx.date)
     candidates = [c for c in candidates if c["id"] not in used_regpayment_ids]
 
+    # L12: defense-in-depth — drop candidates with empty reason before any
+    # LLM call (see _try_match_receipt for the matching rationale).
+    candidates = [c for c in candidates if (c.get("reason") or "").strip()]
+
     if not candidates:
         return (None, None)
 
@@ -424,6 +435,10 @@ def _try_regpayment_amount_mismatch(
     intentionally ignored; no rows are added to it either.
     """
     candidates = db_client.get_regpayment_candidates_by_date(tx.date)
+
+    # L12: defense-in-depth — drop candidates with empty reason before any
+    # LLM call (see _try_match_receipt for the matching rationale).
+    candidates = [c for c in candidates if (c.get("reason") or "").strip()]
 
     if not candidates:
         return None

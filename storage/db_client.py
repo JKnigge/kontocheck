@@ -55,6 +55,7 @@ def get_receipt_candidates(amount: Decimal, bank_date: date) -> list[dict]:
         "WHERE total_amount = %s "
         "AND receipt_date <= %s "
         "AND receipt_date >= DATE_SUB(%s, INTERVAL %s DAY) "
+        "AND issuer IS NOT NULL AND issuer <> '' "
         "ORDER BY receipt_date DESC"
     )
     cursor.execute(
@@ -79,6 +80,7 @@ def get_regpayment_candidates(signed_cents: int, bank_date: date) -> list[dict]:
         "WHERE amount = %s "
         "AND startDate <= %s "
         "AND (endDate IS NULL OR endDate >= %s) "
+        "AND reason IS NOT NULL AND reason <> '' "
         "AND user = %s"
     )
     cursor.execute(query, (signed_cents, bank_date, bank_date, config.REGPAYMENT_USER_ID))
@@ -97,6 +99,7 @@ def get_regpayment_candidates_by_date(bank_date: date) -> list[dict]:
         FROM regpayment
         WHERE startDate <= %s
           AND (endDate IS NULL OR endDate >= %s)
+          AND reason IS NOT NULL AND reason <> ''
           AND user = %s
     """
     try:

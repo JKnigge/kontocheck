@@ -269,13 +269,10 @@ class TestTryMatchReceipt:
         assert result.matched_id == 40
         assert result.date_gap_days == 1
 
-    @pytest.mark.xfail(reason="L12: empty issuer candidate should be skipped before LLM call")
     def test_empty_issuer_not_considered(self):
         """U56: Empty issuer candidate should be skipped entirely — no LLM call,
-        no uncertain fallback. Currently _check_name_similarity returns
-        'no_match' for empty strings, so the candidate doesn't match but the
-        LLM IS still called. After L12 fix the candidate should be filtered
-        before the LLM call is made.
+        no uncertain fallback. The L12 fix filters empty-issuer candidates
+        before _check_name_similarity is invoked.
         Linked: L12"""
         r = make_receipt(id=50, issuer="", amount=15.00, days_before_bank=1)
         mock_db.get_receipt_candidates.return_value = [r]
@@ -364,13 +361,10 @@ class TestTryMatchRegpayment:
         assert result.matched_source == "regpayment"
         assert result.matched_id == 30
 
-    @pytest.mark.xfail(reason="L12: empty reason candidate should be skipped before LLM call")
     def test_empty_reason_not_considered(self):
         """U62: Empty reason candidate should be skipped entirely — no LLM call,
-        no uncertain fallback. Currently _check_name_similarity returns
-        'no_match' for empty strings, so the candidate doesn't match but the
-        LLM IS still called. After L12 fix the candidate should be filtered
-        before the LLM call is made.
+        no uncertain fallback. The L12 fix filters empty-reason candidates
+        before _check_name_similarity is invoked.
         Linked: L12"""
         rp = make_regpayment(id=40, reason="", amount_cents=-1099)
         mock_db.get_regpayment_candidates.return_value = [rp]

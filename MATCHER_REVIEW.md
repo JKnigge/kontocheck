@@ -219,7 +219,7 @@ Each item below has an explicit status checkbox.
   OR split into a pure `_build_…` + explicit `used_*.add(...)` at the call site.
 
 ### L12. Empty issuer/reason candidates are pointless
-- [ ] **Status:** open
+- [x] **Status:** done
 - **Where:** `storage/db_client.py:48` (receipts query), `:65`, `:82`
   (regpayment queries).
 - **Fix:** Add `AND issuer IS NOT NULL AND issuer <> ''` (resp. `reason`) to
