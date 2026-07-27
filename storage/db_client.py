@@ -79,14 +79,6 @@ def get_receipt_candidates_by_date(
         return []
 
 
-def get_receipt_candidates(amount: Decimal, bank_date: date) -> list[dict]:
-    """Backwards-compatible wrapper around get_receipt_candidates_by_date
-    that adds the exact-amount predicate using the configured window."""
-    return get_receipt_candidates_by_date(
-        bank_date, config.RECEIPT_DATE_WINDOW_DAYS, amount
-    )
-
-
 def get_regpayment_candidates_by_date(
     bank_date: date, signed_cents: int | None = None
 ) -> list[dict]:
@@ -118,8 +110,3 @@ def get_regpayment_candidates_by_date(
         logger.warning("Could not fetch regpayment candidates by date: %s", exc)
         return []
 
-
-def get_regpayment_candidates(signed_cents: int, bank_date: date) -> list[dict]:
-    """Backwards-compatible wrapper around get_regpayment_candidates_by_date
-    that adds the exact-amount predicate."""
-    return get_regpayment_candidates_by_date(bank_date, signed_cents)

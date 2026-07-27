@@ -119,11 +119,7 @@ def _parse_verdict(text: str) -> str:
     """
     tokens = re.findall(r"[a-z_]+", text.lower())
     first_word = next((t for t in tokens if t in {"match", "no_match", "uncertain"}), "")
-    if first_word == "match":
-        return "match"
-    if first_word == "uncertain":
-        return "uncertain"
-    return "no_match"
+    return first_word if first_word in {"match", "uncertain"} else "no_match"
 
 
 def _parse_choice_verdict(text: str) -> tuple[str, list[int]]:
@@ -148,19 +144,12 @@ def _parse_choice_verdict(text: str) -> tuple[str, list[int]]:
     """
     cleaned = _strip_thinking(text).strip().lower()
 
-    # match: <nums>
-    m = re.match(r"^[*>#\-\s]*match\b[:\s]+([\d,\s]+)", cleaned)
-    if m:
-        nums = _extract_numbers(m.group(1))
-        if nums:
-            return ("match", nums)
-
-    # uncertain: <nums>
-    m = re.match(r"^[*>#\-\s]*uncertain\b[:\s]+([\d,\s]+)", cleaned)
-    if m:
-        nums = _extract_numbers(m.group(1))
-        if nums:
-            return ("uncertain", nums)
+    for verdict in ("match", "uncertain"):
+        m = re.match(rf"^[*>#\-\s]*{verdict}\b[:\s]+([\d,\s]+)", cleaned)
+        if m:
+            nums = _extract_numbers(m.group(1))
+            if nums:
+                return (verdict, nums)
 
     # bare verdict with no indices — fall back to _parse_verdict
     verdict = _parse_verdict(cleaned)
@@ -232,6 +221,18 @@ def _format_candidate_amount(c: dict) -> str:
 def _candidate_name(c: dict) -> str:
     """Return the display name of a candidate (issuer for receipts, reason for regpayments)."""
     return (c.get("issuer") or c.get("reason") or "").strip()
+
+
+def _candidate_source_label(candidates: list[dict]) -> str:
+    """Build the source label for the LLM prompt from a candidate list.
+
+    Returns ``"receipt/regpayment"`` when candidates from both tables are
+    present, otherwise the single source (``"receipt"`` or ``"regpayment"``).
+    """
+    sources = {c["__source"] for c in candidates}
+    if sources == {"receipt", "regpayment"}:
+        return "receipt/regpayment"
+    return candidates[0]["__source"]
 
 
 def _build_candidate_choice_prompt(
@@ -356,22 +357,21 @@ def _gather_amount_match_candidates(tx: Transaction, signed_cents: int) -> list[
             tx.date, config.RECEIPT_DATE_WINDOW_DAYS, amount=tx.amount
         )
         # L12: drop empty/whitespace-only issuers
-        receipts = [c for c in receipts if (c.get("issuer") or "").strip()]
-        # H4: drop receipts older than the configured window
-        window_days = getattr(config, "RECEIPT_DATE_WINDOW_DAYS", None)
-        if window_days:
-            lower_bound = tx.date - timedelta(days=window_days)
-            receipts = [
-                c for c in receipts
-                if c.get("receipt_date") is None or c["receipt_date"] >= lower_bound
-            ]
+        receipts = [c for c in receipts if _candidate_name(c)]
+        # H4: drop receipts older than the configured window (defense-in-depth;
+        # the SQL query already filters by DATE_SUB).
+        lower_bound = tx.date - timedelta(days=config.RECEIPT_DATE_WINDOW_DAYS)
+        receipts = [
+            c for c in receipts
+            if c.get("receipt_date") is None or c["receipt_date"] >= lower_bound
+        ]
         for r in receipts:
             r["__source"] = "receipt"
             candidates.append(r)
 
     regpays = db_client.get_regpayment_candidates_by_date(tx.date, signed_cents)
     # L12: drop empty/whitespace-only reasons
-    regpays = [c for c in regpays if (c.get("reason") or "").strip()]
+    regpays = [c for c in regpays if _candidate_name(c)]
     for rp in regpays:
         rp["__source"] = "regpayment"
         candidates.append(rp)
@@ -391,11 +391,12 @@ def _gather_name_only_candidates(tx: Transaction) -> list[dict]:
     when it happens to match).
     """
     candidates: list[dict] = []
-    window_days = getattr(config, "RECEIPT_DATE_WINDOW_DAYS", 28)
 
     if tx.direction == "debit":
-        receipts = db_client.get_receipt_candidates_by_date(tx.date, window_days)
-        receipts = [c for c in receipts if (c.get("issuer") or "").strip()]
+        receipts = db_client.get_receipt_candidates_by_date(
+            tx.date, config.RECEIPT_DATE_WINDOW_DAYS
+        )
+        receipts = [c for c in receipts if _candidate_name(c)]
         for r in receipts:
             r["__source"] = "receipt"
             r["__amount_match"] = (
@@ -405,7 +406,7 @@ def _gather_name_only_candidates(tx: Transaction) -> list[dict]:
             candidates.append(r)
 
     regpays = db_client.get_regpayment_candidates_by_date(tx.date)
-    regpays = [c for c in regpays if (c.get("reason") or "").strip()]
+    regpays = [c for c in regpays if _candidate_name(c)]
     signed_cents = _to_signed_cents(tx.amount, tx.direction)
     for rp in regpays:
         rp["__source"] = "regpayment"
@@ -534,10 +535,7 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
 
         if amount_candidates:
             # Step 2 — single LLM call over the candidate set
-            source_label = (
-                "receipt/regpayment" if {c["__source"] for c in amount_candidates} == {"receipt", "regpayment"}
-                else amount_candidates[0]["__source"]
-            )
+            source_label = _candidate_source_label(amount_candidates)
             verdict, indices = _choose_candidate(tx, amount_candidates, source_label)
 
             if verdict == "match" and indices:
@@ -600,10 +598,7 @@ def _match_name_only_fallback(tx: Transaction) -> MatchResult:
     if not candidates:
         return MatchResult(transaction=tx, status=NO_MATCH)
 
-    source_label = (
-        "receipt/regpayment" if {c["__source"] for c in candidates} == {"receipt", "regpayment"}
-        else candidates[0]["__source"]
-    )
+    source_label = _candidate_source_label(candidates)
     verdict, indices = _choose_candidate(
         tx, candidates, source_label, conservative=True
     )

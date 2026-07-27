@@ -59,19 +59,20 @@ def _make_mock_connection():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# get_receipt_candidates — SQL query shape (H4)
+# get_receipt_candidates_by_date (with amount) — SQL query shape (H4)
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestGetReceiptCandidatesQuery:
-    """Verify the SQL query built by get_receipt_candidates includes the
-    H4 lower bound on receipt_date and the existing upper bound / ORDER BY.
+    """Verify the SQL query built by get_receipt_candidates_by_date (with
+    the amount filter) includes the H4 lower bound on receipt_date and the
+    existing upper bound / ORDER BY.
     """
 
     def test_query_includes_lower_bound_predicate(self):
         """The query string must contain a DATE_SUB-based lower bound."""
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), date(2024, 4, 15))
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28, amount=Decimal("43.20"))
 
         sql = cursor.execute.call_args[0][0]
         assert "receipt_date" in sql.lower()
@@ -84,7 +85,7 @@ class TestGetReceiptCandidatesQuery:
         """The existing receipt_date <= bank_date predicate must remain."""
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), date(2024, 4, 15))
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28, amount=Decimal("43.20"))
 
         sql = cursor.execute.call_args[0][0]
         assert "receipt_date <= %s" in sql.lower() or "receipt_date <=%s" in sql.lower()
@@ -93,7 +94,7 @@ class TestGetReceiptCandidatesQuery:
         """ORDER BY receipt_date DESC must be preserved."""
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), date(2024, 4, 15))
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28, amount=Decimal("43.20"))
 
         sql = cursor.execute.call_args[0][0]
         assert "order by receipt_date desc" in sql.lower()
@@ -104,7 +105,7 @@ class TestGetReceiptCandidatesQuery:
         conn, cursor = _make_mock_connection()
         bank_date = date(2024, 4, 15)
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), bank_date)
+            db_client.get_receipt_candidates_by_date(bank_date, 28, amount=Decimal("43.20"))
 
         params = cursor.execute.call_args[0][1]
         assert Decimal("43.20") in params or "43.20" in {str(p) for p in params}
@@ -118,7 +119,7 @@ class TestGetReceiptCandidatesQuery:
         conn, cursor = _make_mock_connection()
         bank_date = date(2024, 4, 15)
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), bank_date)
+            db_client.get_receipt_candidates_by_date(bank_date, 28, amount=Decimal("43.20"))
 
         sql = cursor.execute.call_args[0][0]
         # The lower bound predicate must reference receipt_date and use %s
@@ -138,7 +139,7 @@ class TestReceiptQueryFiltersEmptyIssuer:
     def test_query_includes_issuer_not_null_predicate(self):
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), date(2024, 4, 15))
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28, amount=Decimal("43.20"))
 
         sql = cursor.execute.call_args[0][0].lower()
         assert "issuer is not null" in sql, (
@@ -148,7 +149,7 @@ class TestReceiptQueryFiltersEmptyIssuer:
     def test_query_includes_issuer_nonempty_predicate(self):
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_receipt_candidates(Decimal("43.20"), date(2024, 4, 15))
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28, amount=Decimal("43.20"))
 
         sql = cursor.execute.call_args[0][0].lower()
         assert "issuer <>" in sql or "issuer !=" in sql, (
@@ -162,21 +163,21 @@ class TestRegpaymentQueryFiltersEmptyReason:
     def test_amount_query_includes_reason_not_null(self):
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_regpayment_candidates(-1099, date(2024, 4, 15))
+            db_client.get_regpayment_candidates_by_date(date(2024, 4, 15), signed_cents=-1099)
 
         sql = cursor.execute.call_args[0][0].lower()
         assert "reason is not null" in sql, (
-            "L12: get_regpayment_candidates query must include `reason IS NOT NULL`"
+            "L12: regpayment amount query must include `reason IS NOT NULL`"
         )
 
     def test_amount_query_includes_reason_nonempty(self):
         conn, cursor = _make_mock_connection()
         with patch.object(db_client, "_get_connection", return_value=conn):
-            db_client.get_regpayment_candidates(-1099, date(2024, 4, 15))
+            db_client.get_regpayment_candidates_by_date(date(2024, 4, 15), signed_cents=-1099)
 
         sql = cursor.execute.call_args[0][0].lower()
         assert "reason <>" in sql or "reason !=" in sql, (
-            "L12: get_regpayment_candidates query must include `reason <> ''`"
+            "L12: regpayment amount query must include `reason <> ''`"
         )
 
     def test_date_query_includes_reason_not_null(self):
