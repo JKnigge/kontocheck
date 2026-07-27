@@ -107,8 +107,7 @@ def section(title: str) -> None:
 
 def _reset_db():
     mock_db.reset_mock(return_value=True, side_effect=True)
-    mock_db.get_receipt_candidates.return_value = []
-    mock_db.get_regpayment_candidates.return_value = []
+    mock_db.get_regpayment_candidates_by_date.return_value = []
     mock_db.get_regpayment_candidates_by_date.return_value = []
     mock_db.get_receipt_candidates_by_date.return_value = []
 
@@ -118,7 +117,7 @@ def _reset_db():
 section("Test 1 — MATCH: receipt found and LLM picks it")
 
 _reset_db()
-mock_db.get_receipt_candidates.return_value = [
+mock_db.get_receipt_candidates_by_date.return_value = [
     make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
 ]
 
@@ -138,7 +137,7 @@ check("no notes",                  r.notes == [],                       f"got: {
 section("Test 2 — MATCH: receipt with 10-day gap still MATCH (no delay tiers)")
 
 _reset_db()
-mock_db.get_receipt_candidates.return_value = [
+mock_db.get_receipt_candidates_by_date.return_value = [
     make_receipt(id=2, issuer="Telekom", amount=39.99, days_before_bank=10)
 ]
 
@@ -155,7 +154,7 @@ check("matched_id is 2",                  r.matched_id == 2,         f"got: {r.m
 section("Test 3 — MATCH: receipt at window boundary (28d) still MATCH")
 
 _reset_db()
-mock_db.get_receipt_candidates.return_value = [
+mock_db.get_receipt_candidates_by_date.return_value = [
     make_receipt(id=3, issuer="Amazon", amount=29.99, days_before_bank=28)
 ]
 
@@ -172,7 +171,7 @@ check("matched_id is 3",            r.matched_id == 3,         f"got: {r.matched
 section("Test 4 — MATCH: receipt flagged by belegbot (unreviewed note)")
 
 _reset_db()
-mock_db.get_receipt_candidates.return_value = [
+mock_db.get_receipt_candidates_by_date.return_value = [
     make_receipt(
         id=4, issuer="Unbekannt GmbH", amount=15.00, days_before_bank=2,
         confidence="low", manually_checked=None,
@@ -192,7 +191,7 @@ check("belegbot note present",   any("belegbot" in n.lower() for n in r.notes), 
 section("Test 5 — MATCH: regular payment found in regpayment table")
 
 _reset_db()
-mock_db.get_regpayment_candidates.return_value = [
+mock_db.get_regpayment_candidates_by_date.return_value = [
     make_regpayment(id=10, reason="Miete", amount_cents=-95000)
 ]
 
@@ -211,7 +210,7 @@ check("matched_id is 10",             r.matched_id == 10,               f"got: {
 section("Test 6 — MATCH: income (credit) matched against positive regpayment amount")
 
 _reset_db()
-mock_db.get_regpayment_candidates.return_value = [
+mock_db.get_regpayment_candidates_by_date.return_value = [
     make_regpayment(id=11, reason="Gehalt", amount_cents=250000)
 ]
 
@@ -229,9 +228,12 @@ check("matched_name is Gehalt",      r.matched_name == "Gehalt",     f"got: {r.m
 section("Test 7 — UNCERTAIN: regpayment name matches but amount differs")
 
 _reset_db()
-mock_db.get_regpayment_candidates_by_date.return_value = [
-    make_regpayment(id=12, reason="Handyvertrag", amount_cents=-3999)  # €39.99 expected
-]
+# Amount-path call (with signed_cents) returns []; name-only call (without)
+# returns the regpayment with a different amount.
+_rp_mismatch = make_regpayment(id=12, reason="Handyvertrag", amount_cents=-3999)  # €39.99 expected
+def _get_regpays_mismatch(bank_date, signed_cents=None):
+    return [] if signed_cents is not None else [_rp_mismatch]
+mock_db.get_regpayment_candidates_by_date.side_effect = _get_regpays_mismatch
 
 with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("TELEKOM MOBILFUNK", 42.99, direction="debit")])
@@ -264,7 +266,7 @@ check("matched_id is None",       r.matched_id is None,          f"got: {r.match
 section("Test 9 — UNCERTAIN: LLM says uncertain on amount-matching candidates")
 
 _reset_db()
-mock_db.get_receipt_candidates.return_value = [
+mock_db.get_receipt_candidates_by_date.return_value = [
     make_receipt(id=5, issuer="Unbekannte Firma", amount=22.50, days_before_bank=2)
 ]
 
@@ -283,7 +285,7 @@ section("Test 10 — 1-to-1 constraint: two txs claim same receipt → both UNCE
 
 _reset_db()
 receipt = make_receipt(id=6, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
-mock_db.get_receipt_candidates.return_value = [receipt]
+mock_db.get_receipt_candidates_by_date.return_value = [receipt]
 
 tx1 = make_tx("REWE SAGT DANKE",   43.20, tx_date=date(2024, 4, 15))
 tx2 = make_tx("REWE MARKT 12345",  43.20, tx_date=date(2024, 4, 16))
@@ -317,7 +319,7 @@ section("Test 12 — Chronological ordering: results sorted by transaction date"
 
 _reset_db()
 receipt = make_receipt(id=7, issuer="Supermarkt", amount=20.00, days_before_bank=1)
-mock_db.get_receipt_candidates.return_value = [receipt]
+mock_db.get_receipt_candidates_by_date.return_value = [receipt]
 
 tx_later  = make_tx("SUPERMARKT", 20.00, tx_date=date(2024, 4, 20))
 tx_earlier = make_tx("SUPERMARKT", 20.00, tx_date=date(2024, 4, 15))

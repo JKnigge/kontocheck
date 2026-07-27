@@ -67,8 +67,6 @@ def _reset_db_mock():
     reset_mock() does NOT clear side_effect by default, so we must
     explicitly reset it to prevent leakage between tests."""
     mock_db.reset_mock(return_value=True, side_effect=True)
-    mock_db.get_receipt_candidates.return_value = []
-    mock_db.get_regpayment_candidates.return_value = []
     mock_db.get_regpayment_candidates_by_date.return_value = []
     mock_db.get_receipt_candidates_by_date.return_value = []
 
@@ -189,7 +187,7 @@ class TestMatchAll:
     def test_single_receipt_match(self):
         """One tx, one receipt, LLM says match → MATCH."""
         r = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.MATCH
@@ -200,7 +198,7 @@ class TestMatchAll:
     def test_single_regpayment_match(self):
         """One tx, one regpayment, LLM says match → MATCH."""
         rp = make_regpayment(id=10, reason="Miete", amount_cents=-95000)
-        mock_db.get_regpayment_candidates.return_value = [rp]
+        mock_db.get_regpayment_candidates_by_date.return_value = [rp]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([
                 make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit"),
@@ -220,7 +218,7 @@ class TestMatchAll:
     def test_amount_match_uncertain(self):
         """LLM says uncertain on amount-matching candidates → UNCERTAIN."""
         r = make_receipt(id=1, issuer="Maybe REWE", amount=43.20, days_before_bank=3)
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
         with patch.object(matcher, "_choose_candidate", return_value=("uncertain", [1])):
             results = matcher.match_all([make_tx("REWE?", 43.20)])
         assert results[0].status == matcher.UNCERTAIN
@@ -232,7 +230,7 @@ class TestMatchAll:
         contested candidate in both candidates[], each conflict_with lists
         the other."""
         r = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
 
         tx1 = make_tx("REWE SAGT DANKE", 43.20, tx_date=date(2024, 4, 15))
         tx2 = make_tx("REWE MARKT 12345", 43.20, tx_date=date(2024, 4, 16))
@@ -259,7 +257,7 @@ class TestMatchAll:
     def test_single_claimant_stays_match(self):
         """One tx claims a row → stays MATCH (no false conflict)."""
         r = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.MATCH
@@ -274,7 +272,7 @@ class TestMatchAll:
                             file_name="receipt_d0.pdf")
         r_d1 = make_receipt(id=2, issuer="Amazon", amount=19.99, days_before_bank=1,
                             file_name="receipt_d1.pdf")
-        mock_db.get_receipt_candidates.return_value = [r_d0, r_d1]
+        mock_db.get_receipt_candidates_by_date.return_value = [r_d0, r_d1]
 
         tx_d1 = make_tx("AMAZON PAYMENTS EU", 19.99, tx_date=date(2024, 4, 15))
         tx_d2 = make_tx("AMAZON PAYMENTS EU", 19.99, tx_date=date(2024, 4, 16))
@@ -303,12 +301,12 @@ class TestMatchAll:
         receipt → both MATCH, unique matched_ids."""
         r1 = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=2)
         r2 = make_receipt(id=2, issuer="EDEKA", amount=50.00, days_before_bank=1)
-        # get_receipt_candidates returns different lists based on amount
-        def get_receipts(amount, bank_date):
+        # get_receipt_candidates_by_date returns different lists based on amount
+        def get_receipts(bank_date, window_days, amount=None):
             if amount == Decimal("43.20"):
                 return [r1]
             return [r2]
-        mock_db.get_receipt_candidates.side_effect = get_receipts
+        mock_db.get_receipt_candidates_by_date.side_effect = get_receipts
 
         tx1 = make_tx("REWE SAGT DANKE", 43.20, tx_date=date(2024, 4, 15))
         tx2 = make_tx("EDEKA MARKT", 50.00, tx_date=date(2024, 4, 16))
@@ -330,7 +328,7 @@ class TestMatchAll:
             id=1, issuer="Unbekannt GmbH", amount=15.00, days_before_bank=2,
             confidence="low", manually_checked=None,
         )
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([make_tx("UNBEKANNT REF 123", 15.00)])
         assert results[0].status == matcher.MATCH
@@ -342,7 +340,7 @@ class TestMatchAll:
             id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3,
             confidence="high", manually_checked=1,
         )
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.MATCH
@@ -353,7 +351,11 @@ class TestMatchAll:
         different amount → LLM says uncertain → UNCERTAIN with
         amount_match=False."""
         rp = make_regpayment(id=12, reason="Handyvertrag", amount_cents=-3999)
-        mock_db.get_regpayment_candidates_by_date.return_value = [rp]
+        # Amount-path call (with signed_cents) returns []; name-only call
+        # (without) returns [rp] so the regpayment surfaces in the fallback.
+        def get_regpays(bank_date, signed_cents=None):
+            return [] if signed_cents is not None else [rp]
+        mock_db.get_regpayment_candidates_by_date.side_effect = get_regpays
         with patch.object(matcher, "_choose_candidate", return_value=("uncertain", [1])):
             results = matcher.match_all([
                 make_tx("TELEKOM MOBILFUNK", 42.99, direction="debit"),
@@ -369,7 +371,9 @@ class TestMatchAll:
         amount_match=False and amount-differs note (subsumes old
         AMOUNT_MISMATCH)."""
         rp = make_regpayment(id=12, reason="Handyvertrag", amount_cents=-3999)
-        mock_db.get_regpayment_candidates_by_date.return_value = [rp]
+        def get_regpays(bank_date, signed_cents=None):
+            return [] if signed_cents is not None else [rp]
+        mock_db.get_regpayment_candidates_by_date.side_effect = get_regpays
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([
                 make_tx("TELEKOM MOBILFUNK", 42.99, direction="debit"),
@@ -384,8 +388,17 @@ class TestMatchAll:
         falls through to name-only fallback."""
         r = make_receipt(id=1, issuer="Wrong Store", amount=43.20, days_before_bank=3)
         rp = make_regpayment(id=10, reason="Miete", amount_cents=-3999)
-        mock_db.get_receipt_candidates.return_value = [r]
-        mock_db.get_regpayment_candidates_by_date.return_value = [rp]
+        # Amount-path call (with amount kwarg) returns the receipt; the
+        # name-only call (without amount) returns no receipts so only the
+        # regpayment surfaces in the fallback.
+        def get_receipts(bank_date, window_days, amount=None):
+            return [r] if amount is not None else []
+        mock_db.get_receipt_candidates_by_date.side_effect = get_receipts
+        # Amount-path regpayment call (with signed_cents) returns []; the
+        # name-only call (without) returns [rp].
+        def get_regpays(bank_date, signed_cents=None):
+            return [] if signed_cents is not None else [rp]
+        mock_db.get_regpayment_candidates_by_date.side_effect = get_regpays
 
         # First call (amount candidates) → no_match; second call (name-only) → uncertain
         call_count = [0]
@@ -412,7 +425,12 @@ class TestMatchAll:
         transaction falls through to NO_MATCH.
         Linked: H4"""
         old_receipt = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=730)
-        mock_db.get_receipt_candidates.return_value = [old_receipt]
+        # Amount-path call (with amount) returns the stale receipt so the
+        # H4 Python filter removes it; the name-only call (without amount)
+        # returns [] — in production the SQL date window excludes it too.
+        def get_receipts(bank_date, window_days, amount=None):
+            return [old_receipt] if amount is not None else []
+        mock_db.get_receipt_candidates_by_date.side_effect = get_receipts
         with patch.object(matcher, "_choose_candidate") as mock_choose:
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.NO_MATCH
@@ -423,7 +441,7 @@ class TestMatchAll:
         H4 filter must not over-fire on legitimate candidates.
         Linked: H4"""
         fresh = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
-        mock_db.get_receipt_candidates.return_value = [fresh]
+        mock_db.get_receipt_candidates_by_date.return_value = [fresh]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.MATCH
@@ -434,7 +452,7 @@ class TestMatchAll:
         a valid candidate (boundary is inclusive).
         Linked: H4"""
         boundary = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=28)
-        mock_db.get_receipt_candidates.return_value = [boundary]
+        mock_db.get_receipt_candidates_by_date.return_value = [boundary]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].matched_source == "receipt"
@@ -445,7 +463,12 @@ class TestMatchAll:
         Boundary is inclusive on the window side.
         Linked: H4"""
         stale = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=29)
-        mock_db.get_receipt_candidates.return_value = [stale]
+        # Amount-path call returns the stale receipt so the H4 Python filter
+        # removes it; the name-only call returns [] (SQL date window excludes
+        # it in production).
+        def get_receipts(bank_date, window_days, amount=None):
+            return [stale] if amount is not None else []
+        mock_db.get_receipt_candidates_by_date.side_effect = get_receipts
         with patch.object(matcher, "_choose_candidate") as mock_choose:
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.NO_MATCH
@@ -457,7 +480,7 @@ class TestMatchAll:
         Linked: H4"""
         stale = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=730)
         fresh = make_receipt(id=2, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
-        mock_db.get_receipt_candidates.return_value = [stale, fresh]
+        mock_db.get_receipt_candidates_by_date.return_value = [stale, fresh]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])) as mock_choose:
             results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
         assert results[0].status == matcher.MATCH
@@ -476,14 +499,13 @@ class TestMatchAll:
         to regpayment-only matching.
         Linked: H1"""
         r = make_receipt(id=1, issuer="Amazon", amount=29.99, days_before_bank=1)
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
         mock_db.get_receipt_candidates_by_date.return_value = [r]
         with patch.object(matcher, "_choose_candidate") as mock_choose:
             results = matcher.match_all([
                 make_tx("AMAZON REFUND", 29.99, direction="credit"),
             ])
-        # get_receipt_candidates should NOT be called for credit txs
-        mock_db.get_receipt_candidates.assert_not_called()
+        # get_receipt_candidates_by_date should NOT be called for credit txs
         mock_db.get_receipt_candidates_by_date.assert_not_called()
         # Without regpayment candidates, result is NO_MATCH
         assert results[0].status == matcher.NO_MATCH
@@ -493,7 +515,7 @@ class TestMatchAll:
         Validates H1 doesn't break income matching.
         Linked: H1"""
         rp = make_regpayment(id=1, reason="Gehalt", amount_cents=250000)
-        mock_db.get_regpayment_candidates.return_value = [rp]
+        mock_db.get_regpayment_candidates_by_date.return_value = [rp]
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([
                 make_tx("ARBEITGEBER GMBH GEHALT", 2500.00, direction="credit"),
@@ -505,8 +527,7 @@ class TestMatchAll:
 
     def test_chronological_ordering(self):
         """Results are returned sorted by transaction date."""
-        mock_db.get_receipt_candidates.return_value = []
-        mock_db.get_regpayment_candidates.return_value = []
+        mock_db.get_receipt_candidates_by_date.return_value = []
         mock_db.get_regpayment_candidates_by_date.return_value = []
 
         txs = [
@@ -546,7 +567,7 @@ class TestOneToOnePostcondition:
         """Two txs claim the same receipt → both UNCERTAIN (neither wins).
         The 1-to-1 postcondition holds because neither claims the row."""
         r = make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
-        mock_db.get_receipt_candidates.return_value = [r]
+        mock_db.get_receipt_candidates_by_date.return_value = [r]
 
         tx1 = make_tx("REWE SAGT DANKE", 43.20, tx_date=date(2024, 4, 15))
         tx2 = make_tx("REWE MARKT 12345", 43.20, tx_date=date(2024, 4, 16))
@@ -562,7 +583,7 @@ class TestOneToOnePostcondition:
     def test_two_txs_same_regpayment_both_uncertain(self):
         """Two txs claim the same regpayment → both UNCERTAIN."""
         rp = make_regpayment(id=10, reason="Miete", amount_cents=-95000)
-        mock_db.get_regpayment_candidates.return_value = [rp]
+        mock_db.get_regpayment_candidates_by_date.return_value = [rp]
 
         tx1 = make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit",
                       tx_date=date(2024, 4, 15))
@@ -582,11 +603,11 @@ class TestOneToOnePostcondition:
         r1 = make_receipt(id=1, issuer="REWE", amount=43.20, days_before_bank=2)
         r2 = make_receipt(id=2, issuer="EDEKA", amount=50.00, days_before_bank=1)
 
-        def get_receipts(amount, bank_date):
+        def get_receipts(bank_date, window_days, amount=None):
             if amount == Decimal("43.20"):
                 return [r1]
             return [r2]
-        mock_db.get_receipt_candidates.side_effect = get_receipts
+        mock_db.get_receipt_candidates_by_date.side_effect = get_receipts
 
         tx1 = make_tx("REWE SAGT DANKE", 43.20, tx_date=date(2024, 4, 15))
         tx2 = make_tx("EDEKA MARKT", 50.00, tx_date=date(2024, 4, 16))

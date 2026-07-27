@@ -352,7 +352,9 @@ def _gather_amount_match_candidates(tx: Transaction, signed_cents: int) -> list[
     candidates: list[dict] = []
 
     if tx.direction == "debit":
-        receipts = db_client.get_receipt_candidates(tx.amount, tx.date)
+        receipts = db_client.get_receipt_candidates_by_date(
+            tx.date, config.RECEIPT_DATE_WINDOW_DAYS, amount=tx.amount
+        )
         # L12: drop empty/whitespace-only issuers
         receipts = [c for c in receipts if (c.get("issuer") or "").strip()]
         # H4: drop receipts older than the configured window
@@ -367,7 +369,7 @@ def _gather_amount_match_candidates(tx: Transaction, signed_cents: int) -> list[
             r["__source"] = "receipt"
             candidates.append(r)
 
-    regpays = db_client.get_regpayment_candidates(signed_cents, tx.date)
+    regpays = db_client.get_regpayment_candidates_by_date(tx.date, signed_cents)
     # L12: drop empty/whitespace-only reasons
     regpays = [c for c in regpays if (c.get("reason") or "").strip()]
     for rp in regpays:
