@@ -71,6 +71,35 @@ def get_receipt_candidates(amount: Decimal, bank_date: date) -> list[dict]:
     return rows
 
 
+def get_receipt_candidates_by_date(bank_date: date, window_days: int) -> list[dict]:
+    """
+    Return all receipt rows within [bank_date - window_days, bank_date],
+    regardless of amount. Used by the name-only fallback in Pass A Step 3
+    of the redesigned matcher when no amount-matching candidates exist.
+
+    Same SELECT columns as get_receipt_candidates. Ordered by date
+    proximity to bank_date (ascending ABS(DATEDIFF)) then receipt_date DESC
+    so the closest receipts are surfaced first.
+    """
+    sql = (
+        "SELECT id, file_name, issuer, receipt_date, total_amount, "
+        "confidence, manually_checked "
+        "FROM receipts "
+        "WHERE receipt_date <= %s "
+        "AND receipt_date >= DATE_SUB(%s, INTERVAL %s DAY) "
+        "AND issuer IS NOT NULL AND issuer <> '' "
+        "ORDER BY ABS(DATEDIFF(receipt_date, %s)) ASC, receipt_date DESC"
+    )
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(sql, (bank_date, bank_date, window_days, bank_date))
+        return cursor.fetchall()
+    except mysql.connector.Error as exc:
+        logger.warning("Could not fetch receipt candidates by date: %s", exc)
+        return []
+
+
 def get_regpayment_candidates(signed_cents: int, bank_date: date) -> list[dict]:
     conn = _get_connection()
     cursor = conn.cursor(dictionary=True)
