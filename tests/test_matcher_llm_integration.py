@@ -1,19 +1,25 @@
 """
 tests/test_matcher_llm_integration.py — opt-in integration tests with real Ollama
 
-These tests verify the LLM prompt design by calling a real Ollama instance.
-They are skipped by default; run with:
+These tests verify the LLM candidate-choice prompt design by calling a real
+Ollama instance. They are skipped by default; run with:
     python -m pytest -m integration tests/test_matcher_llm_integration.py -v
 
 Marked @pytest.mark.integration so they only run when explicitly requested.
 Each case verifies *the prompt itself* on real model behaviour — by definition
 not mockable, because the thing under test IS the model's reaction to the prompt.
+
+The tests call _choose_candidate with a single-candidate list and assert the
+verdict (match/uncertain/no_match) matches the expected set. This exercises
+the _build_candidate_choice_prompt → LLM → _parse_choice_verdict pipeline.
 """
 
 import importlib.util
 import os
 import sys
 import types
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +38,7 @@ mock_config.OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 mock_config.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-r1")
 mock_config.DATE_TIER1_DAYS = 5
 mock_config.DATE_TIER2_DAYS = 14
+mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID = 1
 sys.modules["config"] = mock_config
 
@@ -62,12 +69,16 @@ matcher = _mod
 pytestmark = pytest.mark.integration
 
 
+# Each case sends a single-candidate list to _choose_candidate and checks
+# that the verdict falls within the expected set. The candidate's amount
+# matches the tx amount so the candidate would be an amount-matching one.
 INTEGRATION_CASES = [
-    # (id, bank_description, candidate_name, expected_verdicts, verifies)
+    # (id, bank_description, candidate_name, amount, expected_verdicts, verifies)
     (
         "I1",
         "Kartenzahlung OBI.SAGT.DANKE/Hamburg/DE",
         "OBI GmbH & Co. Deutschland KG",
+        43.20,
         {"match"},
         "Clean brand-token case — sanity smoke test",
     ),
@@ -75,6 +86,7 @@ INTEGRATION_CASES = [
         "I2",
         "Basislastschrift EDEKA SAGT DANKE/BERLIN",
         "EDEKA Müller oHG",
+        43.20,
         {"match"},
         "German chain with regional operator",
     ),
@@ -82,6 +94,7 @@ INTEGRATION_CASES = [
         "I3",
         "Kartenzahlung Stadtwerke Hamburg",
         "Stadtwerke München AG",
+        43.20,
         {"no_match", "uncertain"},
         "M9 — generic-token collision must NOT count as match",
     ),
@@ -89,6 +102,7 @@ INTEGRATION_CASES = [
         "I4",
         "POS 4711 //DE",
         "OBI Bau- und Heimwerkermärkte",
+        43.20,
         {"uncertain"},
         "M9 — truncated description must trigger uncertain, not no_match",
     ),
@@ -96,6 +110,7 @@ INTEGRATION_CASES = [
         "I5",
         "SEPA Überweisung MUELLER J M",
         "Jan Müller",
+        43.20,
         {"match"},
         "Personal-name case with abbreviated initials",
     ),
@@ -115,15 +130,35 @@ def ollama_available():
         return False
 
 
+def _make_tx_and_candidate(bank_desc, candidate_name, amount):
+    """Build a Transaction and a single-candidate list (receipt format)."""
+    tx = Transaction(
+        date=date(2024, 4, 15),
+        description=bank_desc,
+        amount=Decimal(str(amount)),
+        direction="debit",
+    )
+    candidate = {
+        "id": 1,
+        "issuer": candidate_name,
+        "total_amount": Decimal(str(amount)),
+        "__source": "receipt",
+    }
+    return tx, [candidate]
+
+
 @pytest.mark.parametrize(
-    "case_id,bank_desc,candidate_name,expected_verdicts,verifies",
+    "case_id,bank_desc,candidate_name,amount,expected_verdicts,verifies",
     INTEGRATION_CASES,
     ids=[c[0] for c in INTEGRATION_CASES],
 )
-def test_llm_similarity(case_id, bank_desc, candidate_name, expected_verdicts, verifies, ollama_available):
-    """Run _check_name_similarity against real Ollama and verify verdict."""
-    result = matcher._check_name_similarity(bank_desc, candidate_name)
-    assert result in expected_verdicts, (
-        f"{case_id}: expected one of {expected_verdicts}, got '{result}' "
-        f"for '{bank_desc}' vs '{candidate_name}' ({verifies})"
+def test_choose_candidate(case_id, bank_desc, candidate_name, amount,
+                          expected_verdicts, verifies, ollama_available):
+    """Run _choose_candidate against real Ollama with a single candidate and
+    verify the verdict matches the expected set."""
+    tx, candidates = _make_tx_and_candidate(bank_desc, candidate_name, amount)
+    verdict, indices = matcher._choose_candidate(tx, candidates, "receipt")
+    assert verdict in expected_verdicts, (
+        f"{case_id}: expected one of {expected_verdicts}, got '{verdict}' "
+        f"(indices={indices}) for '{bank_desc}' vs '{candidate_name}' ({verifies})"
     )

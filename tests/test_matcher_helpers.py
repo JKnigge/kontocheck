@@ -2,8 +2,7 @@
 tests/test_matcher_helpers.py — pytest-style unit tests for pure helpers in matcher.py
 
 Covers: _to_signed_cents, _strip_thinking, _has_brand_overlap,
-_compute_date_gap, _assign_delay_status, _parse_verdict,
-_build_similarity_prompt.
+_parse_verdict, _parse_choice_verdict, _build_candidate_choice_prompt.
 
 These functions have no external dependencies (no DB, no Ollama), so
 no mocking is required beyond the standard import-time config/ollama mock.
@@ -32,6 +31,7 @@ mock_config.OLLAMA_URL = "http://localhost:11434"
 mock_config.OLLAMA_MODEL = "test-model"
 mock_config.DATE_TIER1_DAYS = 5
 mock_config.DATE_TIER2_DAYS = 14
+mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID = 1
 sys.modules["config"] = mock_config
 
@@ -79,7 +79,7 @@ class TestToSignedCents:
 
     def test_debit_19_995_rounding(self):
         result = matcher._to_signed_cents(Decimal("19.995"), "debit")
-        assert result in (-1999, -2000), f"Expected -1999 or -2000, got {result}"
+        assert result in (-1999, -2000), f"Expected -1999 or -2000 for half-cent, got {result}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -190,43 +190,7 @@ class TestHasBrandOverlap:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# _compute_date_gap
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestComputeDateGap:
-    def test_same_day(self):
-        assert matcher._compute_date_gap(date(2024, 4, 15), date(2024, 4, 15)) == 0
-
-    def test_receipt_5_days_before(self):
-        assert matcher._compute_date_gap(date(2024, 4, 15), date(2024, 4, 10)) == 5
-
-    def test_receipt_after_bank_negative(self):
-        assert matcher._compute_date_gap(date(2024, 4, 15), date(2024, 4, 20)) == -5
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# _assign_delay_status  — uses mock config: TIER1=5, TIER2=14
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestAssignDelayStatus:
-    def test_gap_0_matched(self):
-        assert matcher._assign_delay_status(0) == matcher.MATCHED
-
-    def test_gap_5_tier1_boundary(self):
-        assert matcher._assign_delay_status(5) == matcher.MATCHED
-
-    def test_gap_6_large_delay(self):
-        assert matcher._assign_delay_status(6) == matcher.MATCHED_LARGE_DELAY
-
-    def test_gap_14_tier2_boundary(self):
-        assert matcher._assign_delay_status(14) == matcher.MATCHED_LARGE_DELAY
-
-    def test_gap_15_unusual_delay(self):
-        assert matcher._assign_delay_status(15) == matcher.MATCHED_UNUSUAL_DELAY
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# _parse_verdict  (U28–U37)
+# _parse_verdict  (retained — used as fallback by _parse_choice_verdict)
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestParseVerdict:
@@ -285,51 +249,126 @@ class TestParseVerdict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# _build_similarity_prompt  (U38–U41)
+# _parse_choice_verdict  (new — candidate-choice format)
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestBuildSimilarityPrompt:
+class TestParseChoiceVerdict:
+    def test_match_single_index(self):
+        assert matcher._parse_choice_verdict("match: 1") == ("match", [1])
+
+    def test_match_two_digit_index(self):
+        assert matcher._parse_choice_verdict("match: 12") == ("match", [12])
+
+    def test_uncertain_multiple_indices(self):
+        assert matcher._parse_choice_verdict("uncertain: 1,2,3") == ("uncertain", [1, 2, 3])
+
+    def test_uncertain_space_separated(self):
+        assert matcher._parse_choice_verdict("uncertain: 1 2 3") == ("uncertain", [1, 2, 3])
+
+    def test_no_match(self):
+        assert matcher._parse_choice_verdict("no_match") == ("no_match", [])
+
+    def test_match_with_spaces_around_colon(self):
+        assert matcher._parse_choice_verdict("match:   2") == ("match", [2])
+
+    def test_match_uppercase(self):
+        assert matcher._parse_choice_verdict("MATCH: 1") == ("match", [1])
+
+    def test_match_with_markdown_bold_prefix(self):
+        assert matcher._parse_choice_verdict("**match: 1**") == ("match", [1])
+
+    def test_match_with_leading_dash(self):
+        assert matcher._parse_choice_verdict("- match: 1") == ("match", [1])
+
+    def test_uncertain_no_indices_keeps_verdict(self):
+        """'uncertain' with no indices → verdict classified, empty indices."""
+        assert matcher._parse_choice_verdict("uncertain") == ("uncertain", [])
+
+    def test_match_no_indices_keeps_verdict(self):
+        """'match' with no indices → verdict classified, empty indices."""
+        assert matcher._parse_choice_verdict("match") == ("match", [])
+
+    def test_garbage_defaults_to_no_match(self):
+        assert matcher._parse_choice_verdict("asdf") == ("no_match", [])
+
+    def test_empty_defaults_to_no_match(self):
+        assert matcher._parse_choice_verdict("") == ("no_match", [])
+
+    def test_match_with_thinking_block(self):
+        """LLM wraps the verdict in a thinking block — _strip_thinking runs first."""
+        text = f"{_THINK_OPEN}reasoning{_THINK_CLOSE}match: 1"
+        assert matcher._parse_choice_verdict(text) == ("match", [1])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _build_candidate_choice_prompt
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestBuildCandidateChoicePrompt:
     @pytest.fixture()
-    def sample_prompt(self):
-        return matcher._build_similarity_prompt(
-            "Kartenzahlung OBI SAGT DANKE",
-            "OBI GmbH & Co. Deutschland KG",
+    def tx(self):
+        return Transaction(
+            date=date(2024, 4, 15),
+            description="Kartenzahlung OBI SAGT DANKE",
+            amount=Decimal("43.20"),
+            direction="debit",
         )
 
-    def test_contains_both_strings(self, sample_prompt):
-        assert "Kartenzahlung OBI SAGT DANKE" in sample_prompt
-        assert "OBI GmbH & Co. Deutschland KG" in sample_prompt
+    @pytest.fixture()
+    def candidates(self):
+        return [
+            {"id": 1, "issuer": "OBI GmbH", "total_amount": Decimal("43.20")},
+            {"id": 2, "issuer": "REWE Filiale", "total_amount": Decimal("43.20")},
+        ]
 
-    def test_output_contract_last_line(self, sample_prompt):
-        """The output contract line (the 'Answer with exactly one…' line)
-        should be the LAST non-empty line of the prompt, so the LLM's last
-        seen context is the instruction on how to respond.
-        Linked: M6, M9"""
-        non_empty = [line for line in sample_prompt.split("\n") if line.strip()]
+    def test_contains_tx_description(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(tx, candidates, "receipt")
+        assert "Kartenzahlung OBI SAGT DANKE" in prompt
+
+    def test_contains_all_candidate_names(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(tx, candidates, "receipt")
+        assert "OBI GmbH" in prompt
+        assert "REWE Filiale" in prompt
+
+    def test_contains_numbered_list(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(tx, candidates, "receipt")
+        assert "1. OBI GmbH" in prompt
+        assert "2. REWE Filiale" in prompt
+
+    def test_contains_source_label(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(tx, candidates, "receipt")
+        assert "receipt" in prompt
+
+    def test_contains_verdict_format_line(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(tx, candidates, "receipt")
+        assert "match: <n>" in prompt
+        assert "uncertain: <n,m,...>" in prompt
+        assert "no_match" in prompt
+
+    def test_conservative_variant_has_instruction(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(
+            tx, candidates, "receipt", conservative=True
+        )
+        assert "conservative" in prompt.lower()
+        assert "high" in prompt.lower()
+
+    def test_non_conservative_has_no_conservative_instruction(self, tx, candidates):
+        prompt = matcher._build_candidate_choice_prompt(
+            tx, candidates, "receipt", conservative=False
+        )
+        assert "conservative" not in prompt.lower()
+
+    def test_output_contract_last_line(self, tx, candidates):
+        """The output contract line should be the LAST non-empty line."""
+        prompt = matcher._build_candidate_choice_prompt(tx, candidates, "receipt")
+        non_empty = [line for line in prompt.split("\n") if line.strip()]
         last_line = non_empty[-1]
-        assert 'Answer with exactly one lowercase word' in last_line, (
+        assert "Answer with exactly one line" in last_line, (
             f"Expected contract line as last non-empty line, got: {last_line!r}"
         )
 
-    def test_newline_separates_contract_and_data(self, sample_prompt):
-        """At least one blank line (\\n\\n) must separate the output
-        contract instruction from the bank/candidate data.
-        Linked: M6, M9"""
-        contract_anchor = 'or uncertain.'
-        data_anchor = "Bank statement description:"
-        idx_contract = sample_prompt.find(contract_anchor)
-        idx_data = sample_prompt.find(data_anchor)
-        assert idx_contract != -1 and idx_data != -1
-        if idx_data < idx_contract:
-            between = sample_prompt[idx_data + len(data_anchor):idx_contract]
-        else:
-            between = sample_prompt[idx_contract + len(contract_anchor):idx_data]
-        assert "\n\n" in between, (
-            f"Expected at least one blank line between contract and data, "
-            f"got between: {between!r}"
-        )
-
-    def test_contains_verdict_tokens(self, sample_prompt):
-        assert "match" in sample_prompt
-        assert "no_match" in sample_prompt
-        assert "uncertain" in sample_prompt
+    def test_regpayment_candidate_amount_rendered(self, tx):
+        """Regpayment candidates store amount as signed cents — rendered as euros."""
+        rp_candidates = [{"id": 10, "reason": "Miete", "amount": -95000}]
+        prompt = matcher._build_candidate_choice_prompt(tx, rp_candidates, "regpayment")
+        assert "€950.00" in prompt

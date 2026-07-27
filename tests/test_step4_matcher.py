@@ -1,12 +1,13 @@
 """
-manual_tests/test_matcher.py — manual test script for pipeline/matcher.py
+tests/test_step4_matcher.py — manual test script for pipeline/matcher.py
 
-Tests all six status paths and the 1-to-1 constraint without requiring
-a real database or Ollama connection. Both dependencies are mocked so
-the test is fast, deterministic, and runnable in isolation.
+Tests the three redesigned status paths (MATCH, UNCERTAIN, NO_MATCH) and
+the 1-to-1 postcondition (conflict detection) without requiring a real
+database or Ollama connection. Both dependencies are mocked so the test
+is fast, deterministic, and runnable in isolation.
 
 Run from the project root:
-    python manual_tests/test_matcher.py
+    python tests/test_step4_matcher.py
 
 Each test prints PASS or FAIL with a description of what was checked.
 A final summary line shows total passed/failed.
@@ -37,17 +38,15 @@ for _stream in (sys.stdout, sys.stderr):
 
 import types
 mock_config = types.ModuleType("config")
-mock_config.OLLAMA_URL        = "http://localhost:11434"
-mock_config.OLLAMA_MODEL      = "test-model"
-mock_config.DATE_TIER1_DAYS   = 5
-mock_config.DATE_TIER2_DAYS   = 14
+mock_config.OLLAMA_URL         = "http://localhost:11434"
+mock_config.OLLAMA_MODEL       = "test-model"
+mock_config.DATE_TIER1_DAYS    = 5
+mock_config.DATE_TIER2_DAYS    = 14
+mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID = 1
 sys.modules["config"] = mock_config
 
 # ── Mock pipeline.extractor ───────────────────────────────────────────────────
-# Register the shared Transaction class from _helpers under the module name
-# that matcher.py imports from, so Python finds our version instead of the
-# real one.
 
 from tests._helpers import Transaction, make_receipt, make_regpayment, make_tx
 
@@ -64,9 +63,6 @@ sys.modules["storage"] = mock_storage
 sys.modules["storage.db_client"] = mock_db
 
 # ── Now safe to import matcher directly ───────────────────────────────────────
-# We import the file directly using importlib so we bypass the pipeline package
-# entirely — avoiding the conflict between our mocked pipeline.extractor and
-# the real pipeline package on disk.
 
 import importlib.util
 
@@ -109,65 +105,73 @@ def section(title: str) -> None:
     print(f"{'─' * 60}")
 
 
-# ── Test 1: MATCHED (receipt, within tier 1) ──────────────────────────────────
+def _reset_db():
+    mock_db.reset_mock(return_value=True, side_effect=True)
+    mock_db.get_receipt_candidates.return_value = []
+    mock_db.get_regpayment_candidates.return_value = []
+    mock_db.get_regpayment_candidates_by_date.return_value = []
+    mock_db.get_receipt_candidates_by_date.return_value = []
 
-section("Test 1 — MATCHED: receipt found within tier 1 date window")
 
+# ── Test 1: MATCH (receipt) ───────────────────────────────────────────────────
+
+section("Test 1 — MATCH: receipt found and LLM picks it")
+
+_reset_db()
 mock_db.get_receipt_candidates.return_value = [
     make_receipt(id=1, issuer="REWE GmbH", amount=43.20, days_before_bank=3)
 ]
-mock_db.get_regpayment_candidates.return_value = []
-mock_db.get_regpayment_candidates_by_date.return_value = []
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("REWE SAGT DANKE", 43.20)])
 
 r = results[0]
-check("status is MATCHED",         r.status == matcher.MATCHED,    f"got: {r.status}")
-check("matched_source is receipt", r.matched_source == "receipt",  f"got: {r.matched_source}")
-check("matched_id is 1",           r.matched_id == 1,              f"got: {r.matched_id}")
-check("matched_name is REWE GmbH", r.matched_name == "REWE GmbH", f"got: {r.matched_name}")
-check("date_gap_days is 3",        r.date_gap_days == 3,           f"got: {r.date_gap_days}")
-check("no notes",                  r.notes == [],                  f"got: {r.notes}")
+check("status is MATCH",          r.status == matcher.MATCH,           f"got: {r.status}")
+check("matched_source is receipt", r.matched_source == "receipt",       f"got: {r.matched_source}")
+check("matched_id is 1",           r.matched_id == 1,                   f"got: {r.matched_id}")
+check("matched_name is REWE GmbH", r.matched_name == "REWE GmbH",       f"got: {r.matched_name}")
+check("no notes",                  r.notes == [],                       f"got: {r.notes}")
 
 
-# ── Test 2: MATCHED_LARGE_DELAY (receipt, tier 2) ────────────────────────────
+# ── Test 2: MATCH (receipt, large gap within window) ──────────────────────────
 
-section("Test 2 — MATCHED_LARGE_DELAY: receipt found but date gap in tier 2")
+section("Test 2 — MATCH: receipt with 10-day gap still MATCH (no delay tiers)")
 
+_reset_db()
 mock_db.get_receipt_candidates.return_value = [
     make_receipt(id=2, issuer="Telekom", amount=39.99, days_before_bank=10)
 ]
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("TELEKOM DEUTSCHLAND", 39.99)])
 
 r = results[0]
-check("status is MATCHED_LARGE_DELAY", r.status == matcher.MATCHED_LARGE_DELAY, f"got: {r.status}")
-check("date_gap_days is 10",           r.date_gap_days == 10,                    f"got: {r.date_gap_days}")
-check("date gap noted",                any("10 days" in n for n in r.notes),     f"got: {r.notes}")
+check("status is MATCH (no delay tiers)", r.status == matcher.MATCH, f"got: {r.status}")
+check("matched_id is 2",                  r.matched_id == 2,         f"got: {r.matched_id}")
 
 
-# ── Test 3: MATCHED_UNUSUAL_DELAY (receipt, beyond tier 2) ───────────────────
+# ── Test 3: MATCH (receipt, gap at window boundary) ───────────────────────────
 
-section("Test 3 — MATCHED_UNUSUAL_DELAY: receipt found but date gap beyond tier 2")
+section("Test 3 — MATCH: receipt at window boundary (28d) still MATCH")
 
+_reset_db()
 mock_db.get_receipt_candidates.return_value = [
-    make_receipt(id=3, issuer="Amazon", amount=29.99, days_before_bank=20)
+    make_receipt(id=3, issuer="Amazon", amount=29.99, days_before_bank=28)
 ]
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("AMAZON PAYMENTS", 29.99)])
 
 r = results[0]
-check("status is MATCHED_UNUSUAL_DELAY", r.status == matcher.MATCHED_UNUSUAL_DELAY, f"got: {r.status}")
-check("date_gap_days is 20",             r.date_gap_days == 20,                      f"got: {r.date_gap_days}")
+check("status is MATCH (boundary)", r.status == matcher.MATCH, f"got: {r.status}")
+check("matched_id is 3",            r.matched_id == 3,         f"got: {r.matched_id}")
 
 
-# ── Test 4: MATCHED_UNREVIEWED (receipt flagged by belegbot) ─────────────────
+# ── Test 4: MATCH with belegbot-unreviewed note ───────────────────────────────
 
-section("Test 4 — MATCHED_UNREVIEWED: receipt matched but not manually reviewed")
+section("Test 4 — MATCH: receipt flagged by belegbot (unreviewed note)")
 
+_reset_db()
 mock_db.get_receipt_candidates.return_value = [
     make_receipt(
         id=4, issuer="Unbekannt GmbH", amount=15.00, days_before_bank=2,
@@ -175,81 +179,77 @@ mock_db.get_receipt_candidates.return_value = [
     )
 ]
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("UNBEKANNT REF 123", 15.00)])
 
 r = results[0]
-check("status is MATCHED_UNREVIEWED",  r.status == matcher.MATCHED_UNREVIEWED,           f"got: {r.status}")
-check("unreviewed note present",       any("manually reviewed" in n for n in r.notes),   f"got: {r.notes}")
+check("status is MATCH (not a separate status)", r.status == matcher.MATCH, f"got: {r.status}")
+check("belegbot note present",   any("belegbot" in n.lower() for n in r.notes), f"got: {r.notes}")
 
 
-# ── Test 5: MATCHED via regpayment ───────────────────────────────────────────
+# ── Test 5: MATCH via regpayment ───────────────────────────────────────────────
 
-section("Test 5 — MATCHED: regular payment found in regpayment table")
+section("Test 5 — MATCH: regular payment found in regpayment table")
 
-mock_db.get_receipt_candidates.return_value = []
+_reset_db()
 mock_db.get_regpayment_candidates.return_value = [
     make_regpayment(id=10, reason="Miete", amount_cents=-95000)
 ]
-mock_db.get_regpayment_candidates_by_date.return_value = []
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit")])
 
 r = results[0]
-check("status is MATCHED",              r.status == matcher.MATCHED,        f"got: {r.status}")
-check("matched_source is regpayment",   r.matched_source == "regpayment",   f"got: {r.matched_source}")
-check("matched_name is Miete",          r.matched_name == "Miete",          f"got: {r.matched_name}")
-check("matched_id is 10",               r.matched_id == 10,                 f"got: {r.matched_id}")
+check("status is MATCH",              r.status == matcher.MATCH,        f"got: {r.status}")
+check("matched_source is regpayment", r.matched_source == "regpayment", f"got: {r.matched_source}")
+check("matched_name is Miete",        r.matched_name == "Miete",        f"got: {r.matched_name}")
+check("matched_id is 10",             r.matched_id == 10,               f"got: {r.matched_id}")
 
 
-# ── Test 6: MATCHED income via regpayment ────────────────────────────────────
+# ── Test 6: MATCH income via regpayment ───────────────────────────────────────
 
-section("Test 6 — MATCHED: income (credit) matched against positive regpayment amount")
+section("Test 6 — MATCH: income (credit) matched against positive regpayment amount")
 
-mock_db.get_receipt_candidates.return_value = []
+_reset_db()
 mock_db.get_regpayment_candidates.return_value = [
     make_regpayment(id=11, reason="Gehalt", amount_cents=250000)
 ]
-mock_db.get_regpayment_candidates_by_date.return_value = []
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("ARBEITGEBER GMBH GEHALT", 2500.00, direction="credit")])
 
 r = results[0]
-check("status is MATCHED",            r.status == matcher.MATCHED,       f"got: {r.status}")
-check("matched_source is regpayment", r.matched_source == "regpayment",  f"got: {r.matched_source}")
-check("matched_name is Gehalt",       r.matched_name == "Gehalt",        f"got: {r.matched_name}")
+check("status is MATCH",            r.status == matcher.MATCH,       f"got: {r.status}")
+check("matched_source is regpayment", r.matched_source == "regpayment", f"got: {r.matched_source}")
+check("matched_name is Gehalt",      r.matched_name == "Gehalt",     f"got: {r.matched_name}")
 
 
-# ── Test 7: AMOUNT_MISMATCH ───────────────────────────────────────────────────
+# ── Test 7: UNCERTAIN (name-only fallback, regpayment amount differs) ──────────
 
-section("Test 7 — AMOUNT_MISMATCH: regpayment name matches but amount differs")
+section("Test 7 — UNCERTAIN: regpayment name matches but amount differs")
 
-mock_db.get_receipt_candidates.return_value = []
-mock_db.get_regpayment_candidates.return_value = []   # exact amount not found
+_reset_db()
 mock_db.get_regpayment_candidates_by_date.return_value = [
     make_regpayment(id=12, reason="Handyvertrag", amount_cents=-3999)  # €39.99 expected
 ]
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([make_tx("TELEKOM MOBILFUNK", 42.99, direction="debit")])
 
 r = results[0]
-check("status is AMOUNT_MISMATCH",    r.status == matcher.AMOUNT_MISMATCH,              f"got: {r.status}")
-check("matched_source is regpayment", r.matched_source == "regpayment",                 f"got: {r.matched_source}")
-check("mismatch note present",        any("Amount mismatch" in n for n in r.notes),     f"got: {r.notes}")
-check("expected amount in note",      any("39.99" in n for n in r.notes),               f"got: {r.notes}")
-check("actual amount in note",        any("42.99" in n for n in r.notes),               f"got: {r.notes}")
+check("status is MATCH (amount-mismatch is now a note, not a status)",
+      r.status == matcher.MATCH, f"got: {r.status}")
+check("matched_source is regpayment", r.matched_source == "regpayment", f"got: {r.matched_source}")
+check("amount differs note present",   any("amount differs" in n.lower() for n in r.notes), f"got: {r.notes}")
+check("expected amount in note",       any("39.99" in n for n in r.notes), f"got: {r.notes}")
+check("actual amount in note",         any("42.99" in n for n in r.notes), f"got: {r.notes}")
 
 
 # ── Test 8: NO_MATCH ──────────────────────────────────────────────────────────
 
 section("Test 8 — NO_MATCH: no candidate found anywhere")
 
-mock_db.get_receipt_candidates.return_value = []
-mock_db.get_regpayment_candidates.return_value = []
-mock_db.get_regpayment_candidates_by_date.return_value = []
+_reset_db()
 
 results = matcher.match_all([make_tx("UNBEKANNTE BUCHUNG", 7.50)])
 
@@ -259,44 +259,46 @@ check("matched_source is None",   r.matched_source is None,      f"got: {r.match
 check("matched_id is None",       r.matched_id is None,          f"got: {r.matched_id}")
 
 
-# ── Test 9: Uncertain fallback ────────────────────────────────────────────────
+# ── Test 9: Uncertain fallback ─────────────────────────────────────────────────
 
-section("Test 9 — Uncertain fallback: no definitive match, uncertain used as fallback")
+section("Test 9 — UNCERTAIN: LLM says uncertain on amount-matching candidates")
 
+_reset_db()
 mock_db.get_receipt_candidates.return_value = [
     make_receipt(id=5, issuer="Unbekannte Firma", amount=22.50, days_before_bank=2)
 ]
-mock_db.get_regpayment_candidates.return_value = []
-mock_db.get_regpayment_candidates_by_date.return_value = []
 
-with patch.object(matcher, "_check_name_similarity", return_value="uncertain"):
+with patch.object(matcher, "_choose_candidate", return_value=("uncertain", [1])):
     results = matcher.match_all([make_tx("UNBEKANNTE FIRMA IRGENDWO", 22.50)])
 
 r = results[0]
-check("status is not NO_MATCH",       r.status != matcher.NO_MATCH,                     f"got: {r.status}")
-check("matched_source is receipt",    r.matched_source == "receipt",                    f"got: {r.matched_source}")
-check("uncertain note present",       any("Uncertain" in n for n in r.notes),           f"got: {r.notes}")
+check("status is UNCERTAIN",       r.status == matcher.UNCERTAIN, f"got: {r.status}")
+check("has candidates",             len(r.candidates) == 1,       f"got: {r.candidates}")
+check("candidate id is 5",         r.candidates[0].id == 5,      f"got: {r.candidates[0].id}")
 
 
-# ── Test 10: 1-to-1 constraint ────────────────────────────────────────────────
+# ── Test 10: 1-to-1 constraint (conflict) ──────────────────────────────────────
 
-section("Test 10 — 1-to-1 constraint: same receipt not matched to two transactions")
+section("Test 10 — 1-to-1 constraint: two txs claim same receipt → both UNCERTAIN")
 
+_reset_db()
 receipt = make_receipt(id=6, issuer="REWE GmbH", amount=43.20, days_before_bank=2)
 mock_db.get_receipt_candidates.return_value = [receipt]
-mock_db.get_regpayment_candidates.return_value = []
-mock_db.get_regpayment_candidates_by_date.return_value = []
 
 tx1 = make_tx("REWE SAGT DANKE",   43.20, tx_date=date(2024, 4, 15))
 tx2 = make_tx("REWE MARKT 12345",  43.20, tx_date=date(2024, 4, 16))
 
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([tx1, tx2])
 
 r1, r2 = results[0], results[1]
-check("first transaction matched",          r1.status == matcher.MATCHED,    f"got: {r1.status}")
-check("second transaction is NO_MATCH",     r2.status == matcher.NO_MATCH,   f"got: {r2.status}")
-check("different matched_id (1-to-1 held)", r2.matched_id is None,           f"got: {r2.matched_id}")
+check("first transaction UNCERTAIN (conflict)",  r1.status == matcher.UNCERTAIN, f"got: {r1.status}")
+check("second transaction UNCERTAIN (conflict)", r2.status == matcher.UNCERTAIN, f"got: {r2.status}")
+check("first has conflict=True",                r1.conflict is True,            f"got: {r1.conflict}")
+check("second has conflict=True",               r2.conflict is True,            f"got: {r2.conflict}")
+check("first conflict_with lists second",        any("REWE MARKT" in s for s in r1.conflict_with), f"got: {r1.conflict_with}")
+check("second conflict_with lists first",        any("REWE SAGT DANKE" in s for s in r2.conflict_with), f"got: {r2.conflict_with}")
+check("neither claims the row (1-to-1 held)",    r1.matched_id is None and r2.matched_id is None, f"got: {r1.matched_id}, {r2.matched_id}")
 
 
 # ── Test 11: _to_signed_cents conversion ─────────────────────────────────────
@@ -311,30 +313,27 @@ check("debit €10.99 → -1099",     matcher._to_signed_cents(Decimal("10.99"),
 
 # ── Test 12: Chronological ordering ──────────────────────────────────────────
 
-section("Test 12 — Chronological ordering: earlier transaction matched first")
+section("Test 12 — Chronological ordering: results sorted by transaction date")
 
-# Two transactions on different dates, same amount.
-# Only one receipt available. The earlier transaction should get it.
+_reset_db()
 receipt = make_receipt(id=7, issuer="Supermarkt", amount=20.00, days_before_bank=1)
 mock_db.get_receipt_candidates.return_value = [receipt]
-mock_db.get_regpayment_candidates.return_value = []
-mock_db.get_regpayment_candidates_by_date.return_value = []
 
 tx_later  = make_tx("SUPERMARKT", 20.00, tx_date=date(2024, 4, 20))
 tx_earlier = make_tx("SUPERMARKT", 20.00, tx_date=date(2024, 4, 15))
 
 # Pass in reverse order to verify match_all sorts before matching
-with patch.object(matcher, "_check_name_similarity", return_value="match"):
+with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
     results = matcher.match_all([tx_later, tx_earlier])
 
-# Results are returned in the order transactions were sorted (by date),
-# so index 0 = earlier, index 1 = later
-matched   = [r for r in results if r.status == matcher.MATCHED]
-unmatched = [r for r in results if r.status == matcher.NO_MATCH]
+# Results are returned sorted by date
+check("first result is earlier tx",  results[0].transaction.date == date(2024, 4, 15), f"got: {results[0].transaction.date}")
+check("second result is later tx",    results[1].transaction.date == date(2024, 4, 20), f"got: {results[1].transaction.date}")
 
-check("exactly one match",              len(matched) == 1,                                      f"got: {len(matched)}")
-check("earlier transaction matched",    matched[0].transaction.date == date(2024, 4, 15),       f"got: {matched[0].transaction.date}")
-check("later transaction unmatched",    unmatched[0].transaction.date == date(2024, 4, 20),     f"got: {unmatched[0].transaction.date}")
+# Both txs claim the same receipt → both UNCERTAIN (conflict)
+matched = [r for r in results if r.status == matcher.MATCH]
+uncertain = [r for r in results if r.status == matcher.UNCERTAIN]
+check("both UNCERTAIN (conflict over same receipt)", len(uncertain) == 2, f"got: {len(uncertain)} uncertain, {len(matched)} match")
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────

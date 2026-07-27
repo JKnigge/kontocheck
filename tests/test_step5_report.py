@@ -1,10 +1,10 @@
 """
 tests/test_step5_report.py — manual test script for reporting/report.py
 
-Builds synthetic MatchResult objects covering all six status verdicts and
-renders a real Markdown report into a temporary output folder. Checks the
-file is written, each major section renders, and chronological ordering
-is preserved.
+Builds synthetic MatchResult objects covering the three redesigned status
+verdicts (MATCH, UNCERTAIN, NO_MATCH) and renders a real Markdown report
+into a temporary output folder. Checks the file is written, each major
+section renders, and chronological ordering is preserved.
 
 The test mocks config, pipeline.extractor, storage.db_client and ollama
 so it runs without a live .env, database, or Ollama instance.
@@ -49,6 +49,7 @@ mock_config.OLLAMA_URL          = "http://localhost:11434"
 mock_config.OLLAMA_MODEL        = "test-model"
 mock_config.DATE_TIER1_DAYS     = 5
 mock_config.DATE_TIER2_DAYS     = 14
+mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID  = 1
 mock_config.OUTPUT_FOLDER       = TEMP_OUTPUT
 mock_config.ensure_folders      = lambda: TEMP_OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -120,7 +121,7 @@ def section(title: str) -> None:
     print(f"{'─' * 60}")
 
 
-# ── Synthetic MatchResults covering all six status types ─────────────────────
+# ── Synthetic MatchResults covering the three redesigned statuses ─────────────
 
 def make_tx(description, amount, direction="debit", tx_date=date(2024, 4, 15)):
     return Transaction(
@@ -131,54 +132,84 @@ def make_tx(description, amount, direction="debit", tx_date=date(2024, 4, 15)):
     )
 
 
+# Build candidate info for the UNCERTAIN cases
+cand_receipt = matcher.CandidateInfo(
+    source="receipt", id=2, name="Telekom",
+    file_name="20240320-Telekom.pdf",
+    amount_match=True, date_gap_days=10,
+)
+cand_receipt_unreviewed = matcher.CandidateInfo(
+    source="receipt", id=4, name="Unbekannt GmbH",
+    file_name="20240416-Unbekannt.pdf",
+    amount_match=True, date_gap_days=2,
+    note="Receipt flagged by belegbot — please verify",
+)
+cand_regpayment_mismatch = matcher.CandidateInfo(
+    source="regpayment", id=12, name="Handyvertrag",
+    amount_match=False, date_gap_days=None,
+    note="regpayment amount differs — update table if correct",
+)
+cand_contested = matcher.CandidateInfo(
+    source="receipt", id=6, name="REWE GmbH",
+    file_name="20240413-REWE.pdf",
+    amount_match=True, date_gap_days=2,
+    note="Contested — also claimed by another transaction",
+)
+
 results = [
+    # MATCH — receipt
     matcher.MatchResult(
         transaction=make_tx("REWE SAGT DANKE", 43.20, tx_date=date(2024, 4, 5)),
-        status=matcher.MATCHED,
+        status=matcher.MATCH,
         matched_source="receipt",
         matched_id=1,
         matched_name="REWE GmbH",
         matched_file="20240405-REWE.pdf",
-        date_gap_days=2,
     ),
+    # MATCH — receipt with belegbot-unreviewed note
     matcher.MatchResult(
-        transaction=make_tx("TELEKOM DEUTSCHLAND", 39.99, tx_date=date(2024, 4, 10)),
-        status=matcher.MATCHED_LARGE_DELAY,
-        matched_source="receipt",
-        matched_id=2,
-        matched_name="Telekom",
-        matched_file="20240320-Telekom.pdf",
-        date_gap_days=10,
-        notes=["Date gap: 10 days between receipt date and bank booking"],
-    ),
-    matcher.MatchResult(
-        transaction=make_tx("AMAZON PAYMENTS", 29.99, tx_date=date(2024, 4, 12)),
-        status=matcher.MATCHED_UNUSUAL_DELAY,
+        transaction=make_tx("UNBEKANNT REF 123", 15.00, tx_date=date(2024, 4, 10)),
+        status=matcher.MATCH,
         matched_source="receipt",
         matched_id=3,
-        matched_name="Amazon EU SARL",
-        matched_file="20240310-Amazon.pdf",
-        date_gap_days=33,
-        notes=["Date gap: 33 days between receipt date and bank booking"],
-    ),
-    matcher.MatchResult(
-        transaction=make_tx("UNBEKANNT REF 123", 15.00, tx_date=date(2024, 4, 18)),
-        status=matcher.MATCHED_UNREVIEWED,
-        matched_source="receipt",
-        matched_id=4,
         matched_name="Unbekannt GmbH",
-        matched_file="20240416-Unbekannt.pdf",
-        date_gap_days=2,
-        notes=["Receipt was flagged by belegbot and may not have been manually reviewed"],
+        matched_file="20240410-Unbekannt.pdf",
+        notes=["Receipt flagged by belegbot — please verify"],
     ),
+    # MATCH — regpayment with amount differs (name-only fallback)
     matcher.MatchResult(
-        transaction=make_tx("TELEKOM MOBILFUNK", 42.99, tx_date=date(2024, 4, 22)),
-        status=matcher.AMOUNT_MISMATCH,
+        transaction=make_tx("TELEKOM MOBILFUNK", 42.99, tx_date=date(2024, 4, 12)),
+        status=matcher.MATCH,
         matched_source="regpayment",
-        matched_id=12,
+        matched_id=11,
         matched_name="Handyvertrag",
-        notes=["Amount mismatch: expected €39.99, actual €42.99 — update regpayment table if correct"],
+        notes=[
+            "regpayment amount differs — update table if correct "
+            "(expected €39.99, actual €42.99)"
+        ],
     ),
+    # UNCERTAIN — uncertain on amount-matching candidates
+    matcher.MatchResult(
+        transaction=make_tx("TELEKOM DEUTSCHLAND", 39.99, tx_date=date(2024, 4, 18)),
+        status=matcher.UNCERTAIN,
+        candidates=[cand_receipt],
+    ),
+    # UNCERTAIN — conflict: two txs claim the same receipt
+    matcher.MatchResult(
+        transaction=make_tx("SUPERMARKT KAUF", 50.00, tx_date=date(2024, 4, 20)),
+        status=matcher.UNCERTAIN,
+        candidates=[cand_contested],
+        conflict=True,
+        conflict_with=["2024-04-22 SUPERMARKT FILIALE"],
+        notes=["Receipt flagged by belegbot — please verify"],
+    ),
+    # UNCERTAIN — regpayment amount differs (name-only fallback, uncertain)
+    matcher.MatchResult(
+        transaction=make_tx("NETFLIX ABO", 14.99, tx_date=date(2024, 4, 22)),
+        status=matcher.UNCERTAIN,
+        candidates=[cand_regpayment_mismatch],
+    ),
+    # NO_MATCH
     matcher.MatchResult(
         transaction=make_tx("UNBEKANNTE BUCHUNG", 7.50, tx_date=date(2024, 4, 25)),
         status=matcher.NO_MATCH,
@@ -207,8 +238,9 @@ try:
     check("title with period",       "# kontocheck — Statement 2024-04" in text)
     check("source file referenced",  "statement-2024-04.pdf" in text)
     check("analysed timestamp",      "**Analysed:**" in text)
-    check("✅ count = 1",            "✅ 1" in text)
-    check("⚠️ count = 4",            "⚠️ 4" in text)
+    # 3 MATCH + 3 UNCERTAIN + 1 NO_MATCH
+    check("✅ count = 3",            "✅ 3" in text)
+    check("⚠️ count = 3",            "⚠️ 3" in text)
     check("❌ count = 1",            "❌ 1" in text)
 
     # ── Transaction table ───────────────────────────────────────────────────
@@ -226,13 +258,14 @@ try:
 
     section("Attention section")
     check("attention heading",       "## ⚠️ Items requiring attention" in text)
-    check("large delay subsection",  "### 2024-04-10 — TELEKOM DEUTSCHLAND" in text)
-    check("unusual delay subsection","### 2024-04-12 — AMAZON PAYMENTS" in text)
-    check("unreviewed subsection",   "### 2024-04-18 — UNBEKANNT REF 123" in text)
-    check("amount_mismatch subsection","### 2024-04-22 — TELEKOM MOBILFUNK" in text)
-    check("date gap rendered",       "**Date gap:** 33 days" in text)
-    check("expected/actual rendered","expected €39.99" in text and "actual €42.99" in text)
-    check("unreviewed note carried", "manually reviewed" in text)
+    check("uncertain subsection",    "### 2024-04-18 — TELEKOM DEUTSCHLAND" in text)
+    check("conflict subsection",    "### 2024-04-20 — SUPERMARKT KAUF" in text)
+    check("candidates considered rendered", "Candidates considered" in text)
+    check("conflict_with rendered",  "Also claimed by" in text)
+    check("conflict_with content",   "SUPERMARKT FILIALE" in text)
+    check("candidate name in list",  "Telekom" in text)
+    check("belegbot note in attention", "belegbot" in text.lower())
+    check("amount differs note rendered", "amount differs" in text.lower())
 
     # ── Unmatched section ───────────────────────────────────────────────────
 
@@ -244,14 +277,17 @@ try:
 
     section("Statistics")
     check("statistics heading",      "## Statistics" in text)
-    check("matched count line",      "✅ Matched: 1" in text)
-    check("large delay count line",  "⚠️ Matched — large delay: 1" in text)
-    check("unusual delay count line","⚠️ Matched — unusual delay: 1" in text)
-    check("unreviewed count line",   "⚠️ Matched — please verify: 1" in text)
-    check("amount mismatch count",   "⚠️ Amount mismatch: 1" in text)
-    check("no match count",          "❌ No match found: 1" in text)
+    check("match count line",        "✅ Match: 3" in text)
+    check("uncertain count line",    "⚠️ Uncertain — please verify: 3" in text)
+    check("no match count",           "❌ No match: 1" in text)
+    # Total matched = MATCH + UNCERTAIN amounts
+    total_matched = (
+        Decimal("43.20") + Decimal("15.00") + Decimal("42.99")
+        + Decimal("39.99") + Decimal("50.00") + Decimal("14.99")
+    )
     check("total matched amount",
-          f"**Total matched amount:** €{Decimal('43.20') + Decimal('39.99') + Decimal('29.99') + Decimal('15.00') + Decimal('42.99'):.2f}" in text)
+          f"**Total matched amount:** €{total_matched:.2f}" in text,
+          f"expected: €{total_matched:.2f}")
     check("total unmatched amount",  "**Total unmatched amount:** €7.50" in text)
 
     # ── Chronological ordering in the table ────────────────────────────────
@@ -289,6 +325,13 @@ try:
     check("pipe in description is escaped",
           r"WEIRD \| DESC" in pipe_text,
           "pipe character was not escaped — Markdown table would be malformed")
+
+    # ── UNCERTAIN candidates rendered in details column ───────────────────
+
+    section("Candidate rendering in details")
+    check("possible candidates label in details", "Possible candidates:" in text)
+    check("candidate with date gap",             "10d" in text)
+    check("candidate with amount differs tag",   "amount differs" in text)
 
 finally:
     # Clean up the temp output folder

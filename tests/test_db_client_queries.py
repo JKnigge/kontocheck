@@ -198,3 +198,113 @@ class TestRegpaymentQueryFiltersEmptyReason:
         assert "reason <>" in sql or "reason !=" in sql, (
             "L12: get_regpayment_candidates_by_date query must include `reason <> ''`"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# get_receipt_candidates_by_date — SQL query shape (name-only fallback)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestGetReceiptCandidatesByDateQuery:
+    """Verify the SQL query built by get_receipt_candidates_by_date.
+
+    This function is used by the name-only fallback in Pass A Step 3 of
+    the redesigned matcher. It must:
+      - NOT filter by total_amount (no amount predicate)
+      - bound receipt_date both ways (<= bank_date, >= DATE_SUB)
+      - filter empty issuers (L12)
+      - order by date proximity (ABS(DATEDIFF)) then receipt_date DESC
+    """
+
+    def test_query_has_no_amount_predicate(self):
+        """The query must NOT contain a total_amount = %s WHERE predicate.
+        (total_amount appears in the SELECT column list, but must not be
+        in the WHERE clause.)"""
+        conn, cursor = _make_mock_connection()
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+
+        sql = cursor.execute.call_args[0][0].lower()
+        where_clause = sql.split("where")[1] if "where" in sql else ""
+        assert "total_amount" not in where_clause, (
+            "get_receipt_candidates_by_date must not filter by total_amount in WHERE"
+        )
+
+    def test_query_includes_upper_bound(self):
+        """receipt_date <= bank_date must be present."""
+        conn, cursor = _make_mock_connection()
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+
+        sql = cursor.execute.call_args[0][0].lower()
+        assert "receipt_date <= %s" in sql or "receipt_date <=%s" in sql
+
+    def test_query_includes_lower_bound(self):
+        """DATE_SUB lower bound must be present."""
+        conn, cursor = _make_mock_connection()
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+
+        sql = cursor.execute.call_args[0][0].lower()
+        assert "date_sub" in sql, (
+            "expected a DATE_SUB lower bound on receipt_date in the query"
+        )
+
+    def test_query_includes_proximity_order_by(self):
+        """ORDER BY ABS(DATEDIFF(...)) must be present."""
+        conn, cursor = _make_mock_connection()
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+
+        sql = cursor.execute.call_args[0][0].lower()
+        assert "abs(datediff" in sql, (
+            "expected ORDER BY ABS(DATEDIFF(receipt_date, bank_date)) in the query"
+        )
+
+    def test_query_includes_issuer_not_null(self):
+        """L12: issuer IS NOT NULL must be present."""
+        conn, cursor = _make_mock_connection()
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+
+        sql = cursor.execute.call_args[0][0].lower()
+        assert "issuer is not null" in sql
+
+    def test_query_includes_issuer_nonempty(self):
+        """L12: issuer <> '' must be present."""
+        conn, cursor = _make_mock_connection()
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+
+        sql = cursor.execute.call_args[0][0].lower()
+        assert "issuer <>" in sql or "issuer !=" in sql
+
+    def test_params_include_bank_date_and_window(self):
+        """Bound parameters must include bank_date and window_days."""
+        conn, cursor = _make_mock_connection()
+        bank_date = date(2024, 4, 15)
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            db_client.get_receipt_candidates_by_date(bank_date, 28)
+
+        params = cursor.execute.call_args[0][1]
+        assert bank_date in params
+        assert 28 in params
+
+    def test_returns_rows_from_fetchall(self):
+        """The function should return the rows from cursor.fetchall()."""
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [{"id": 1, "issuer": "REWE"}]
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        conn.is_connected.return_value = True
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            rows = db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+        assert rows == [{"id": 1, "issuer": "REWE"}]
+
+    def test_db_error_returns_empty_list(self):
+        """On mysql.connector.Error, return an empty list (not raise)."""
+        import mysql.connector
+        conn = MagicMock()
+        conn.cursor.side_effect = mysql.connector.Error("connection lost")
+        with patch.object(db_client, "_get_connection", return_value=conn):
+            rows = db_client.get_receipt_candidates_by_date(date(2024, 4, 15), 28)
+        assert rows == []
