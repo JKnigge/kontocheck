@@ -6,9 +6,12 @@ Pure rendering from MatchResult objects — no LLM, no DB access.
 Sections produced (in order):
   1. Header — source filename, analysis timestamp, count summary
   2. Transactions — chronological table of every entry
-  3. ⚠️ Items requiring attention — one subsection per non-green entry
+  3. ⚠️ Items requiring attention — one subsection per UNCERTAIN entry
   4. ❌ Unmatched transactions — list of NO_MATCH entries
   5. Statistics — counts per status and total matched/unmatched amounts
+
+Status set (redesigned — see REDESIGN_PLAN.md §4):
+  MATCH, UNCERTAIN, NO_MATCH.
 
 Filename rules (TECHNICAL_SPEC §7.3):
   - Statement period derived from the earliest transaction's year-month:
@@ -26,26 +29,19 @@ from pathlib import Path
 
 import config
 from pipeline.matcher import (
+    CandidateInfo,
     MatchResult,
     STATUS_DISPLAY,
-    MATCHED,
-    MATCHED_LARGE_DELAY,
-    MATCHED_UNUSUAL_DELAY,
-    MATCHED_UNREVIEWED,
-    AMOUNT_MISMATCH,
+    MATCH,
+    UNCERTAIN,
     NO_MATCH,
 )
 
 logger = logging.getLogger(__name__)
 
 
-# Group statuses for the count summary in the header
-_WARNING_STATUSES = {
-    MATCHED_LARGE_DELAY,
-    MATCHED_UNUSUAL_DELAY,
-    MATCHED_UNREVIEWED,
-    AMOUNT_MISMATCH,
-}
+# UNCERTAIN is the only warning status under the redesigned three-status model.
+_WARNING_STATUSES = {UNCERTAIN}
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
@@ -86,7 +82,7 @@ def _statement_period(results: list[MatchResult]) -> str:
 
 def _build_header(results: list[MatchResult], source_file: Path) -> list[str]:
     total = len(results)
-    matched_count = sum(1 for r in results if r.status == MATCHED)
+    matched_count = sum(1 for r in results if r.status == MATCH)
     warning_count = sum(1 for r in results if r.status in _WARNING_STATUSES)
     nomatch_count = sum(1 for r in results if r.status == NO_MATCH)
 
@@ -103,18 +99,53 @@ def _build_header(results: list[MatchResult], source_file: Path) -> list[str]:
     ]
 
 
+def _format_candidate(c: CandidateInfo) -> str:
+    """Render one CandidateInfo as a compact display string."""
+    parts = [c.name, f"({c.source}"]
+    # amount rendering deferred to caller context; here we show source + gap
+    if c.date_gap_days is not None:
+        parts.append(f"{c.date_gap_days}d")
+    if not c.amount_match:
+        parts.append("amount differs")
+    line = " ".join(parts) + ")"
+    if c.note:
+        line += f" — {c.note}"
+    return line
+
+
 def _row_details(r: MatchResult) -> str:
-    """Build the 'Details' table cell: matched name, file, and any notes."""
+    """Build the 'Details' table cell.
+
+    For MATCH: render matched_name + matched_file + notes.
+    For UNCERTAIN: render the candidate list as
+        "Possible candidates: Gastro Meier (receipt 3d), McDonalds Meier (receipt 1d)".
+    For NO_MATCH: render notes (if any).
+    """
     parts: list[str] = []
-    if r.matched_name:
-        parts.append(r.matched_name)
-    if r.matched_file:
-        parts.append(f"`{r.matched_file}`")
-    head = " — ".join(parts)
+
+    if r.status == MATCH:
+        if r.matched_name:
+            parts.append(r.matched_name)
+        if r.matched_file:
+            parts.append(f"`{r.matched_file}`")
+        head = " — ".join(parts)
+        if r.notes:
+            notes_str = "; ".join(r.notes)
+            return f"{head} — {notes_str}" if head else notes_str
+        return head
+
+    if r.status == UNCERTAIN and r.candidates:
+        cand_strs = [_format_candidate(c) for c in r.candidates]
+        head = f"Possible candidates: {', '.join(cand_strs)}"
+        if r.notes:
+            notes_str = "; ".join(r.notes)
+            return f"{head} — {notes_str}"
+        return head
+
+    # NO_MATCH or UNCERTAIN without candidates
     if r.notes:
-        notes_str = "; ".join(r.notes)
-        return f"{head} — {notes_str}" if head else notes_str
-    return head
+        return "; ".join(r.notes)
+    return ""
 
 
 def _build_table(results: list[MatchResult]) -> list[str]:
@@ -156,8 +187,17 @@ def _build_attention(results: list[MatchResult]) -> list[str]:
             lines.append(f"- **Matched:** {r.matched_name}")
         if r.matched_file:
             lines.append(f"- **File:** `{r.matched_file}`")
-        if r.date_gap_days is not None:
-            lines.append(f"- **Date gap:** {r.date_gap_days} days")
+        # Candidate list
+        if r.candidates:
+            lines.append("- **Candidates considered:**")
+            for c in r.candidates:
+                lines.append(f"  - {_format_candidate(c)}")
+        # Conflict info
+        if r.conflict and r.conflict_with:
+            lines.append("- **Also claimed by:**")
+            for other in r.conflict_with:
+                lines.append(f"  - {other}")
+        # Notes
         for note in r.notes:
             lines.append(f"- **Note:** {note}")
         lines.append("")
@@ -182,20 +222,25 @@ def _build_unmatched(results: list[MatchResult]) -> list[str]:
 
 
 def _build_statistics(results: list[MatchResult]) -> list[str]:
-    counts = {status: 0 for status in STATUS_DISPLAY}
+    matched_count = sum(1 for r in results if r.status == MATCH)
+    uncertain_count = sum(1 for r in results if r.status == UNCERTAIN)
+    unmatched_count = sum(1 for r in results if r.status == NO_MATCH)
+
     matched_total = Decimal("0")
     unmatched_total = Decimal("0")
 
     for r in results:
-        counts[r.status] = counts.get(r.status, 0) + 1
         if r.status == NO_MATCH:
             unmatched_total += r.transaction.amount
         else:
+            # MATCH and UNCERTAIN amounts both count toward matched total
+            # (they represent transactions with at least a candidate).
             matched_total += r.transaction.amount
 
     lines = ["## Statistics", ""]
-    for status, display in STATUS_DISPLAY.items():
-        lines.append(f"- {display}: {counts.get(status, 0)}")
+    lines.append(f"- {STATUS_DISPLAY[MATCH]}: {matched_count}")
+    lines.append(f"- {STATUS_DISPLAY[UNCERTAIN]}: {uncertain_count}")
+    lines.append(f"- {STATUS_DISPLAY[NO_MATCH]}: {unmatched_count}")
     lines.append("")
     lines.append(f"**Total matched amount:** {_format_amount(matched_total)}")
     lines.append(f"**Total unmatched amount:** {_format_amount(unmatched_total)}")
