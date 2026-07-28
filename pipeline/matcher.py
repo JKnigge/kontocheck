@@ -8,7 +8,7 @@ Responsibilities:
   - Assign a status verdict to each transaction
   - Return one MatchResult per transaction
 
-Redesigned two-pass algorithm (see REDESIGN_PLAN.md):
+Redesigned two-pass algorithm (see Design Docs/REDESIGN_PLAN.md):
   Pass A — per-transaction candidate gathering + single LLM choice
   Pass B — global reconciliation (1-to-1 postcondition + conflict flagging)
 
@@ -513,7 +513,7 @@ def match_all(transactions: list[Transaction]) -> list[MatchResult]:
     """
     Match all transactions and return one MatchResult per transaction.
 
-    Two-pass algorithm (see REDESIGN_PLAN.md §3):
+    Two-pass algorithm (see Design Docs/REDESIGN_PLAN.md §3):
       Pass A — per-transaction candidate gathering + single LLM choice.
                Build provisional MatchResult objects. No DB row is claimed
                yet.

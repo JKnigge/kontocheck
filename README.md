@@ -15,7 +15,7 @@ kontocheck reads the `receipts` table populated by the **belegbot** receipt-scan
    transaction — date, description, amount, direction — regardless of the
    bank's layout.
 3. Matches each transaction against the **`receipts`** and **`regpayment`**
-   tables using a two-pass algorithm (see `REDESIGN_PLAN.md`):
+   tables using a two-pass algorithm (see `Design Docs/REDESIGN_PLAN.md`):
    - **Pass A** — per transaction, gather amount-matching candidates from both
      tables (exact amount + date constraints) and ask the LLM in a single call
      to pick the right one. If no amount match exists, a name-only fallback
@@ -207,7 +207,7 @@ storage/
 reporting/
   report.py                # MatchResult list → Markdown report
 tests/                     # Step-by-step unit tests for each module
-Design Docs/               # PRD, technical spec, implementation plan
+Design Docs/               # PRD, technical spec, implementation plan, redesign plan, matcher review, test plan
 ```
 
 ---

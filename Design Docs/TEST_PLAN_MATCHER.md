@@ -10,7 +10,7 @@
 
 ## Context
 
-Before implementing the fixes catalogued in `MATCHER_REVIEW.md` (project root),
+Before implementing the fixes catalogued in `MATCHER_REVIEW.md`,
 we need a test suite that:
 
 1. Locks in the current correct behaviour so the fixes don't regress it.

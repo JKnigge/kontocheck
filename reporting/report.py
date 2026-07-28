@@ -10,7 +10,7 @@ Sections produced (in order):
   4. ❌ Unmatched transactions — list of NO_MATCH entries
   5. Statistics — counts per status and total matched/unmatched amounts
 
-Status set (redesigned — see REDESIGN_PLAN.md §4):
+Status set (redesigned — see Design Docs/REDESIGN_PLAN.md §4):
   MATCH, UNCERTAIN, NO_MATCH.
 
 Filename rules (TECHNICAL_SPEC §7.3):
