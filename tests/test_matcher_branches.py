@@ -597,22 +597,28 @@ class TestOneToOnePostcondition:
         assert len(match_results) == 0
         assert all(r.status == matcher.UNCERTAIN for r in results)
 
-    def test_two_txs_same_regpayment_both_uncertain(self):
-        """Two txs claim the same regpayment → both UNCERTAIN."""
+    def test_two_txs_same_regpayment_both_match(self):
+        """Two txs claim the same regpayment → both stay MATCH (Issue 2).
+
+        Regular payments are recurring by nature: a statement covering
+        ~1 month may list two transfers by the same payee (e.g. insurance
+        collected on May 3 and June 3). Both legitimately match the same
+        regpayment row, so the 1-to-1 postcondition does NOT apply to
+        regpayments — only to receipts."""
         rp = make_regpayment(id=10, reason="Miete", amount_cents=-95000)
         mock_db.get_regpayment_candidates_by_date.return_value = [rp]
 
         tx1 = make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit",
                       tx_date=date(2024, 4, 15))
         tx2 = make_tx("HAUSVERWALTUNG MUSTER", 950.00, direction="debit",
-                      tx_date=date(2024, 4, 16))
+                      tx_date=date(2024, 5, 3))
 
         with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
             results = matcher.match_all([tx1, tx2])
 
-        match_results = [r for r in results if r.status == matcher.MATCH]
-        assert len(match_results) == 0
-        assert all(r.status == matcher.UNCERTAIN for r in results)
+        assert all(r.status == matcher.MATCH for r in results)
+        assert all(r.matched_id == 10 for r in results)
+        assert all(r.conflict is False for r in results)
 
     def test_no_two_match_results_share_id(self):
         """When two txs each match a different receipt, both stay MATCH

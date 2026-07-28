@@ -645,15 +645,20 @@ def _reconcile_conflicts(results: list[MatchResult]) -> None:
 
     Mutates `results` in place. For every provisional MATCH result, record
     a claim on (matched_source, matched_id). When ≥2 transactions claim the
-    same row, downgrade ALL claimants to UNCERTAIN with conflict=True,
-    clear their matched_* fields, move the contested candidate into
-    candidates[], and record each other claimant's description + date in
-    conflict_with.
+    same **receipt** row, downgrade ALL claimants to UNCERTAIN with
+    conflict=True, clear their matched_* fields, move the contested
+    candidate into candidates[], and record each other claimant's
+    description + date in conflict_with.
+
+    Regular payments (regpayment) are exempt from the 1-to-1 postcondition
+    (Issue 2): a statement covering ~1 month may legitimately list two
+    transfers by the same recurring payee (e.g. insurance collected on
+    May 3 and June 3). Both transactions keep their MATCH status.
     """
-    # Step 1 — build claims map
+    # Step 1 — build claims map (receipts only; regpayments are recurring)
     claims: dict[tuple[str, int], list[int]] = {}
     for idx, r in enumerate(results):
-        if r.status == MATCH and r.matched_source is not None and r.matched_id is not None:
+        if r.status == MATCH and r.matched_source == "receipt" and r.matched_id is not None:
             key = (r.matched_source, r.matched_id)
             claims.setdefault(key, []).append(idx)
 
