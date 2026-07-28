@@ -36,8 +36,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 mock_config = types.ModuleType("config")
 mock_config.OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 mock_config.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-r1")
-mock_config.DATE_TIER1_DAYS = 5
-mock_config.DATE_TIER2_DAYS = 14
 mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID = 1
 sys.modules["config"] = mock_config

@@ -47,8 +47,6 @@ TEMP_OUTPUT = Path(tempfile.mkdtemp(prefix="kontocheck_report_test_"))
 mock_config = types.ModuleType("config")
 mock_config.OLLAMA_URL          = "http://localhost:11434"
 mock_config.OLLAMA_MODEL        = "test-model"
-mock_config.DATE_TIER1_DAYS     = 5
-mock_config.DATE_TIER2_DAYS     = 14
 mock_config.RECEIPT_DATE_WINDOW_DAYS = 28
 mock_config.REGPAYMENT_USER_ID  = 1
 mock_config.OUTPUT_FOLDER       = TEMP_OUTPUT
