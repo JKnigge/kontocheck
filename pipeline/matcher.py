@@ -494,16 +494,30 @@ def _build_uncertain_result(
     amount_match: bool,
     selected_indices: list[int],
 ) -> MatchResult:
-    """Build an UNCERTAIN result listing the selected candidates."""
+    """Build an UNCERTAIN result listing the selected candidates.
+
+    When a selected candidate's amount differs from the transaction
+    (Issue 1 name-only fallback with a match verdict), an "amount differs"
+    note is added so the reviewer knows the regpayment table may need an
+    update.
+    """
     cand_infos: list[CandidateInfo] = []
+    notes: list[str] = []
     for i, c in enumerate(candidates, start=1):
         if i in selected_indices:
             amt_match = amount_match if amount_match else c.get("__amount_match", True)
             cand_infos.append(_build_candidate_info(c, tx, amt_match))
+            if not amt_match and c["__source"] == "regpayment":
+                expected_euros = abs(c.get("amount", 0)) / 100
+                notes.append(
+                    f"regpayment amount differs — update table if correct "
+                    f"(expected €{expected_euros:.2f}, actual €{tx.amount:.2f})"
+                )
     return MatchResult(
         transaction=tx,
         status=UNCERTAIN,
         candidates=cand_infos,
+        notes=notes,
     )
 
 
@@ -588,9 +602,12 @@ def _match_name_only_fallback(tx: Transaction) -> MatchResult:
     out). Gather broader candidates by date window only and send them to
     the LLM with the conservative prompt variant.
 
-    - match: <n> → provisional MATCH with amount_match=False on the
-      candidate (subsumes the old AMOUNT_MISMATCH diagnostic for
-      regpayments whose amount differs).
+    Status rule (Issue 1): a candidate whose amount does NOT match the
+    transaction can never yield MATCH — name-only agreement requires manual
+    review, so it becomes UNCERTAIN.
+
+    - match: <n> + chosen amount matches → provisional MATCH.
+    - match: <n> + chosen amount differs → UNCERTAIN (amount differs note).
     - uncertain: <n,m,...> → UNCERTAIN with those candidates.
     - no_match → NO_MATCH.
     """
@@ -607,8 +624,14 @@ def _match_name_only_fallback(tx: Transaction) -> MatchResult:
         chosen_idx = indices[0] - 1
         chosen = candidates[chosen_idx]
         amt_match = chosen.get("__amount_match", False)
+        if not amt_match:
+            # Issue 1: non-matching amounts must never get MATCH.
+            return _build_uncertain_result(
+                tx, candidates, amount_match=False,
+                selected_indices=indices,
+            )
         ruled_out = [c for j, c in enumerate(candidates) if j != chosen_idx]
-        return _build_match_result(tx, chosen, ruled_out, amount_match=amt_match)
+        return _build_match_result(tx, chosen, ruled_out, amount_match=True)
     if verdict == "uncertain" and indices:
         return _build_uncertain_result(
             tx, candidates, amount_match=False, selected_indices=indices,

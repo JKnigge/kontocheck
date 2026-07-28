@@ -174,17 +174,13 @@ results = [
         matched_file="20240410-Unbekannt.pdf",
         notes=["Receipt flagged by belegbot — please verify"],
     ),
-    # MATCH — regpayment with amount differs (name-only fallback)
+    # MATCH — regpayment with amount match
     matcher.MatchResult(
-        transaction=make_tx("TELEKOM MOBILFUNK", 42.99, tx_date=date(2024, 4, 12)),
+        transaction=make_tx("TELEKOM MOBILFUNK", 39.99, tx_date=date(2024, 4, 12)),
         status=matcher.MATCH,
         matched_source="regpayment",
         matched_id=11,
         matched_name="Handyvertrag",
-        notes=[
-            "regpayment amount differs — update table if correct "
-            "(expected €39.99, actual €42.99)"
-        ],
     ),
     # UNCERTAIN — uncertain on amount-matching candidates
     matcher.MatchResult(
@@ -201,11 +197,15 @@ results = [
         conflict_with=["2024-04-22 SUPERMARKT FILIALE"],
         notes=["Receipt flagged by belegbot — please verify"],
     ),
-    # UNCERTAIN — regpayment amount differs (name-only fallback, uncertain)
+    # UNCERTAIN — regpayment amount differs (name-only fallback, match verdict)
     matcher.MatchResult(
         transaction=make_tx("NETFLIX ABO", 14.99, tx_date=date(2024, 4, 22)),
         status=matcher.UNCERTAIN,
         candidates=[cand_regpayment_mismatch],
+        notes=[
+            "regpayment amount differs — update table if correct "
+            "(expected €12.99, actual €14.99)"
+        ],
     ),
     # NO_MATCH
     matcher.MatchResult(
@@ -280,7 +280,7 @@ try:
     check("no match count",           "❌ No match: 1" in text)
     # Total matched = MATCH + UNCERTAIN amounts
     total_matched = (
-        Decimal("43.20") + Decimal("15.00") + Decimal("42.99")
+        Decimal("43.20") + Decimal("15.00") + Decimal("39.99")
         + Decimal("39.99") + Decimal("50.00") + Decimal("14.99")
     )
     check("total matched amount",

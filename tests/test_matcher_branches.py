@@ -363,12 +363,32 @@ class TestMatchAll:
         assert results[0].candidates[0].amount_match is False
         assert results[0].candidates[0].source == "regpayment"
 
-    def test_name_only_fallback_amount_mismatch_match(self):
+    def test_name_only_fallback_amount_mismatch_is_uncertain(self):
         """No amount match → name-only fallback finds regpayment with
-        different amount → LLM says match → provisional MATCH with
-        amount_match=False and amount-differs note (subsumes old
-        AMOUNT_MISMATCH)."""
+        different amount → LLM says match → UNCERTAIN (amount differs,
+        requires manual review). Non-matching amounts must never get MATCH."""
         rp = make_regpayment(id=12, reason="Handyvertrag", amount_cents=-3999)
+        def get_regpays(bank_date, signed_cents=None):
+            return [] if signed_cents is not None else [rp]
+        mock_db.get_regpayment_candidates_by_date.side_effect = get_regpays
+        with patch.object(matcher, "_choose_candidate", return_value=("match", [1])):
+            results = matcher.match_all([
+                make_tx("TELEKOM MOBILFUNK", 42.99, direction="debit"),
+            ])
+        assert results[0].status == matcher.UNCERTAIN
+        assert results[0].matched_source is None
+        assert results[0].matched_id is None
+        assert len(results[0].candidates) == 1
+        assert results[0].candidates[0].source == "regpayment"
+        assert results[0].candidates[0].amount_match is False
+        assert any("amount differs" in n.lower() for n in results[0].notes)
+
+    def test_name_only_fallback_amount_match_stays_match(self):
+        """Name-only fallback where the chosen candidate's amount DOES
+        match the transaction → stays MATCH (amount AND name match)."""
+        rp = make_regpayment(id=12, reason="Handyvertrag", amount_cents=-4299)
+        # Amount-path call (with signed_cents=-4299) returns []; name-only
+        # call (without) returns [rp] whose amount happens to match.
         def get_regpays(bank_date, signed_cents=None):
             return [] if signed_cents is not None else [rp]
         mock_db.get_regpayment_candidates_by_date.side_effect = get_regpays
@@ -379,7 +399,6 @@ class TestMatchAll:
         assert results[0].status == matcher.MATCH
         assert results[0].matched_source == "regpayment"
         assert results[0].matched_id == 12
-        assert any("amount differs" in n.lower() for n in results[0].notes)
 
     def test_amount_match_no_match_falls_through_to_name_only(self):
         """Amount-matching candidates exist but LLM says no_match →
