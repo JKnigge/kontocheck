@@ -62,6 +62,8 @@ class CandidateInfo:
     id:            int
     name:          str                          # issuer or reason
     file_name:     Optional[str]      = None
+    amount:        Optional[Decimal]  = None    # candidate amount (euros, always positive)
+    date:          Optional[date]     = None    # receipt_date or startDate
     amount_match:  bool              = True     # False = name-only fallback candidate
     date_gap_days: Optional[int]     = None     # display only, no status impact
     note:          Optional[str]     = None     # e.g. "amount differs — update regpayment table"
@@ -423,16 +425,25 @@ def _build_candidate_info(c: dict, tx: Transaction, amount_match: bool) -> Candi
     source = c["__source"]
     gap: Optional[int] = None
     note: Optional[str] = None
+    cand_amount: Optional[Decimal] = None
+    cand_date: Optional[date] = None
 
-    if source == "receipt" and c.get("receipt_date") is not None:
-        gap = (tx.date - c["receipt_date"]).days
+    if source == "receipt":
+        if c.get("receipt_date") is not None:
+            cand_date = c["receipt_date"]
+            gap = (tx.date - c["receipt_date"]).days
+        if c.get("total_amount") is not None:
+            cand_amount = Decimal(str(c["total_amount"]))
     elif source == "regpayment":
         # regpayment has no single receipt date; use startDate if present
         if c.get("startDate") is not None:
+            cand_date = c["startDate"]
             try:
                 gap = (tx.date - c["startDate"]).days
             except Exception:
                 gap = None
+        if c.get("amount") is not None:
+            cand_amount = Decimal(str(abs(c["amount"]))) / Decimal("100")
 
     if not amount_match and source == "regpayment":
         note = "regpayment amount differs — update table if correct"
@@ -442,6 +453,8 @@ def _build_candidate_info(c: dict, tx: Transaction, amount_match: bool) -> Candi
         id=c["id"],
         name=_candidate_name(c),
         file_name=c.get("file_name"),
+        amount=cand_amount,
+        date=cand_date,
         amount_match=amount_match,
         date_gap_days=gap,
         note=note,

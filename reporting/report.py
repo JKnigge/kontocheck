@@ -47,13 +47,18 @@ _WARNING_STATUSES = {UNCERTAIN}
 # ── Formatting helpers ────────────────────────────────────────────────────────
 
 def _sanitize_cell(text: str) -> str:
-    """Escape characters that break a Markdown table cell."""
+    """Escape characters that break a Markdown table cell.
+
+    Newlines are converted to ``<br>`` so that multi-line content (e.g. the
+    candidate list in an UNCERTAIN details cell) renders as separate lines
+    within the table cell in GitHub-flavoured Markdown.
+    """
     if text is None:
         return ""
     return (
         str(text)
-        .replace("\r", " ")
-        .replace("\n", " ")
+        .replace("\r", "")
+        .replace("\n", "<br>")
         .replace("|", r"\|")
         .strip()
     )
@@ -99,15 +104,38 @@ def _build_header(results: list[MatchResult], source_file: Path) -> list[str]:
     ]
 
 
+def _format_candidate_amount(c: CandidateInfo) -> str:
+    """Render a candidate's amount as ``99.99 €`` (or ``?`` when unknown)."""
+    if c.amount is None:
+        return "?"
+    return f"{c.amount:.2f} €"
+
+
 def _format_candidate(c: CandidateInfo) -> str:
-    """Render one CandidateInfo as a compact display string."""
-    parts = [c.name, f"({c.source}"]
-    # amount rendering deferred to caller context; here we show source + gap
-    if c.date_gap_days is not None:
-        parts.append(f"{c.date_gap_days}d")
-    if not c.amount_match:
-        parts.append("amount differs")
-    line = " ".join(parts) + ")"
+    """Render one CandidateInfo as a compact display string.
+
+    Receipts:   ``Name - filename: amount € (YYYY.mm.dd - nd)``
+    Regpayments: ``Name: amount € (regpayment)``
+
+    A trailing ``— note`` is appended when the candidate carries a note
+    (e.g. amount-differs or contested).
+    """
+    if c.source == "receipt":
+        amt = _format_candidate_amount(c)
+        if c.date is not None and c.date_gap_days is not None:
+            date_str = c.date.strftime("%Y.%m.%d")
+            suffix = f": {amt} ({date_str} - {c.date_gap_days}d)"
+        else:
+            suffix = f": {amt}"
+        if c.file_name:
+            line = f"{c.name} - {c.file_name}{suffix}"
+        else:
+            line = f"{c.name}{suffix}"
+    else:
+        # regpayment
+        amt = _format_candidate_amount(c)
+        line = f"{c.name}: {amt} (regpayment)"
+
     if c.note:
         line += f" — {c.note}"
     return line
@@ -117,13 +145,14 @@ def _row_details(r: MatchResult) -> str:
     """Build the 'Details' table cell.
 
     For MATCH: render matched_name + matched_file + notes.
-    For UNCERTAIN: render the candidate list as
-        "Possible candidates: Gastro Meier (receipt 3d), McDonalds Meier (receipt 1d)".
+    For UNCERTAIN: render the candidate list, one candidate per line::
+        Possible candidates:
+        Name - file: amount € (date - nd)
+        Name: amount € (regpayment)
     For NO_MATCH: render notes (if any).
     """
-    parts: list[str] = []
-
     if r.status == MATCH:
+        parts: list[str] = []
         if r.matched_name:
             parts.append(r.matched_name)
         if r.matched_file:
@@ -136,11 +165,10 @@ def _row_details(r: MatchResult) -> str:
 
     if r.status == UNCERTAIN and r.candidates:
         cand_strs = [_format_candidate(c) for c in r.candidates]
-        head = f"Possible candidates: {', '.join(cand_strs)}"
+        lines = ["Possible candidates:", *cand_strs]
         if r.notes:
-            notes_str = "; ".join(r.notes)
-            return f"{head} — {notes_str}"
-        return head
+            lines.extend(r.notes)
+        return "\n".join(lines)
 
     # NO_MATCH or UNCERTAIN without candidates
     if r.notes:

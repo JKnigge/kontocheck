@@ -134,22 +134,26 @@ def make_tx(description, amount, direction="debit", tx_date=date(2024, 4, 15)):
 cand_receipt = matcher.CandidateInfo(
     source="receipt", id=2, name="Telekom",
     file_name="20240320-Telekom.pdf",
+    amount=Decimal("39.99"), date=date(2024, 3, 20),
     amount_match=True, date_gap_days=10,
 )
 cand_receipt_unreviewed = matcher.CandidateInfo(
     source="receipt", id=4, name="Unbekannt GmbH",
     file_name="20240416-Unbekannt.pdf",
+    amount=Decimal("15.00"), date=date(2024, 4, 16),
     amount_match=True, date_gap_days=2,
     note="Receipt flagged by belegbot — please verify",
 )
 cand_regpayment_mismatch = matcher.CandidateInfo(
     source="regpayment", id=12, name="Handyvertrag",
+    amount=Decimal("12.99"), date=None,
     amount_match=False, date_gap_days=None,
     note="regpayment amount differs — update table if correct",
 )
 cand_contested = matcher.CandidateInfo(
     source="receipt", id=6, name="REWE GmbH",
     file_name="20240413-REWE.pdf",
+    amount=Decimal("50.00"), date=date(2024, 4, 13),
     amount_match=True, date_gap_days=2,
     note="Contested — also claimed by another transaction",
 )
@@ -330,6 +334,57 @@ try:
     check("possible candidates label in details", "Possible candidates:" in text)
     check("candidate with date gap",             "10d" in text)
     check("candidate with amount differs tag",   "amount differs" in text)
+    check("candidate rendered with new format",
+          "Telekom - 20240320-Telekom.pdf: 39.99 € (2024.03.20 - 10d)" in text,
+          "expected receipt candidate in 'Name - file: amt € (date - nd)' format")
+    check("regpayment candidate rendered with new format",
+          "Handyvertrag: 12.99 € (regpayment)" in text,
+          "expected regpayment candidate in 'Name: amt € (regpayment)' format")
+    check("candidates separated by <br> in table cell", "<br>" in text)
+
+    # ── Multiple candidates with one per line, ordered by date gap ───────
+
+    section("Multiple candidates per line")
+    multi_cands = [
+        # 5d gap (closest first)
+        matcher.CandidateInfo(
+            source="receipt", id=20, name="Obi Baumarkt",
+            file_name="20260502_Obi.pdf",
+            amount=Decimal("99.99"), date=date(2026, 5, 2),
+            amount_match=True, date_gap_days=5,
+        ),
+        # 10d gap (further)
+        matcher.CandidateInfo(
+            source="receipt", id=21, name="REWE Filiale",
+            file_name="20260427_REWE.pdf",
+            amount=Decimal("99.99"), date=date(2026, 4, 27),
+            amount_match=True, date_gap_days=10,
+        ),
+    ]
+    multi_results = [
+        matcher.MatchResult(
+            transaction=make_tx("KARTENZAHLUNG OBI", 99.99, tx_date=date(2026, 5, 7)),
+            status=matcher.UNCERTAIN,
+            candidates=multi_cands,
+        ),
+    ]
+    multi_path = report.generate(multi_results, Path("multi.pdf"))
+    multi_text = multi_path.read_text(encoding="utf-8")
+    check("multi: each candidate on its own line (<br>)",
+          multi_text.count("<br>") >= 2,
+          f"expected at least 2 <br> tags, got: {multi_text.count('<br>')}")
+    check("multi: closest candidate rendered",
+          "Obi Baumarkt - 20260502_Obi.pdf: 99.99 € (2026.05.02 - 5d)" in multi_text,
+          "expected closest receipt candidate in new format")
+    check("multi: furthest candidate rendered",
+          "REWE Filiale - 20260427_REWE.pdf: 99.99 € (2026.04.27 - 10d)" in multi_text,
+          "expected furthest receipt candidate in new format")
+    # Verify the closest candidate (5d) appears before the furthest (10d)
+    pos_5d = multi_text.find("5d)")
+    pos_10d = multi_text.find("10d)")
+    check("multi: closest candidate appears before furthest",
+          0 <= pos_5d < pos_10d,
+          f"expected 5d before 10d, got positions: {pos_5d}, {pos_10d}")
 
 finally:
     # Clean up the temp output folder
