@@ -14,14 +14,19 @@ kontocheck reads the `receipts` table populated by the **belegbot** receipt-scan
 2. Uses a local LLM (via [Ollama](https://ollama.com/)) to extract every
    transaction — date, description, amount, direction — regardless of the
    bank's layout.
-3. Matches each transaction against:
-   - the **`receipts`** table (exact amount + receipt date ≤ booking date +
-     LLM name similarity), then
-   - the **`regpayment`** table (exact signed-cent amount + active date range +
-     LLM name similarity), then
-   - a last-resort **amount mismatch** check against `regpayment` (name matches
-     but amount differs — flags stale regpayment rows).
-4. Enforces a 1-to-1 mapping: each DB row is matched to at most one transaction.
+3. Matches each transaction against the **`receipts`** and **`regpayment`**
+   tables using a two-pass algorithm (see `REDESIGN_PLAN.md`):
+   - **Pass A** — per transaction, gather amount-matching candidates from both
+     tables (exact amount + date constraints) and ask the LLM in a single call
+     to pick the right one. If no amount match exists, a name-only fallback
+     searches by date window only (this is where regpayment rows whose amount
+     has drifted surface as `UNCERTAIN` candidates with an "amount differs"
+     note).
+   - **Pass B** — global reconciliation: if two transactions both claim the
+     same DB row, neither wins; both are flagged `UNCERTAIN` with
+     `conflict=True` for human review. This enforces the 1-to-1 postcondition
+     (each DB row matched to at most one transaction) without greedy
+     first-come-first-served assignment.
 5. Writes a Markdown report to `OUTPUT_FOLDER` with a transactions table, an
    "items requiring attention" section, an unmatched list, and statistics.
 
@@ -29,12 +34,9 @@ Status verdicts used in the report:
 
 | Status | Meaning |
 |---|---|
-| ✅ Matched | Receipt or regpayment found, date gap ≤ `DATE_TIER1_DAYS` |
-| ⚠️ Matched — large delay | Date gap ≤ `DATE_TIER2_DAYS` |
-| ⚠️ Matched — unusual delay | Date gap > `DATE_TIER2_DAYS` |
-| ⚠️ Matched — please verify | Receipt flagged by belegbot, not manually reviewed |
-| ⚠️ Amount mismatch | Name matches a regpayment row but the amount differs |
-| ❌ No match found | No candidate in either source |
+| ✅ Match | LLM is certain about one candidate; no other transaction contests the same DB row |
+| ⚠️ Uncertain | LLM uncertain, name-only fallback found plausible candidates, or two transactions contest the same DB row (conflict) |
+| ❌ No match | No candidate in either source |
 
 ---
 
@@ -107,8 +109,7 @@ cp .env.example .env
 | `OLLAMA_URL` | URL of the Ollama server, e.g. `http://192.168.1.x:11434` |
 | `OLLAMA_MODEL` | Model name, e.g. `deepseek-r1:14b` |
 | `OUTPUT_FOLDER` | Where reports are written (default `kontocheck_reports`) |
-| `DATE_TIER1_DAYS` | Receipt→booking gap that still counts as ✅ (default `5`) |
-| `DATE_TIER2_DAYS` | Gap up to which it's flagged as "large delay" (default `14`) |
+| `RECEIPT_DATE_WINDOW_DAYS` | Receipt-date lower bound (days back from bank date) for candidate lookups (default `28`) |
 | `REGPAYMENT_USER_ID` | Integer `user` id whose regpayment rows are queried |
 
 All non-optional variables are required at startup — the process exits with a
@@ -140,8 +141,9 @@ What happens in order:
    before any LLM work is done.
 3. The PDF is opened with `pdfplumber` and converted to text.
 4. The text is sent to the LLM, which returns a JSON array of transactions.
-5. Each transaction is matched against `receipts`, then `regpayment`, then the
-   amount-mismatch check. Status verdicts are assigned.
+5. Each transaction is matched via the two-pass algorithm (Pass A: candidate
+   gathering + LLM choice; Pass B: global reconciliation + conflict flagging).
+   Status verdicts are assigned.
 6. A Markdown report is written to `OUTPUT_FOLDER`, named after the statement
    period (e.g. `kontocheck-2026-04.md`).
 7. The final line printed to stdout is the absolute path of the report:
@@ -156,9 +158,9 @@ What happens in order:
 python kontocheck.py statement.pdf --log-level DEBUG
 ```
 
-`DEBUG` prints the LLM's name-similarity verdict for every receipt/regpayment
-candidate it considers. Helpful when a transaction was unexpectedly flagged as
-`❌ No match` or `⚠️ Amount mismatch`.
+`DEBUG` prints the LLM's candidate-choice verdict for every transaction it
+processes. Helpful when a transaction was unexpectedly flagged as `⚠️ Uncertain`
+or `❌ No match`.
 
 ### Reading the report
 
@@ -213,11 +215,17 @@ Design Docs/               # PRD, technical spec, implementation plan
 ## Tests
 
 ```bash
-python -m pytest tests/
+# pytest modules (mock DB + Ollama — safe to run together):
+python -m pytest tests/test_matcher_helpers.py tests/test_matcher_branches.py tests/test_db_client_queries.py tests/test_matcher_llm_integration.py
+
+# Legacy script-mode tests (NOT pytest modules — they call sys.exit() at module
+# load and CRASH if collected by pytest. NEVER run `python -m pytest tests/`):
+python tests/test_step4_matcher.py   # matcher regression (44 manual checks)
+python tests/test_step5_report.py    # report rendering regression (39 manual checks)
 ```
 
 The test files mirror the implementation steps: config, db_client, extractor,
-matcher, report.
+matcher, report. See `AGENTS.md` for the full test inventory and run commands.
 
 ---
 
