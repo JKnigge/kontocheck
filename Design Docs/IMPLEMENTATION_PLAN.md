@@ -1,8 +1,16 @@
 # kontocheck — Implementation Plan
 
+> ⚠️ **OUTDATED — pre-redesign version.** This plan describes the original
+> single-pass matcher with six statuses and the `used_receipt_ids` /
+> `used_regpayment_ids` greedy-commit mechanism. The matcher was rewritten as
+> a two-pass algorithm (deferred commitment + global reconciliation) with three
+> statuses (`MATCH`, `UNCERTAIN`, `NO_MATCH`); see `REDESIGN_PLAN.md` for the
+> current design and `AGENTS.md` for the current module/test inventory.
+> Retained as a historical design record only.
+
 **Version:** 1.1  
 **Date:** 2026-05-08  
-**Status:** Ready to begin  
+**Status:** Ready to begin (superseded by redesign — see notice above)
 
 ### Changelog
 | Version | Change |

@@ -1,5 +1,13 @@
 # Matcher Review — Findings & Fix Plan
 
+> ⚠️ **Historical document — predates the two-pass redesign.** The defect IDs
+> below (H1–H5, L1x, M1x) are still referenced by xfail markers and
+> `AGENTS.md`, but the cited line numbers and function names
+> (`_try_match_receipt`, `_check_name_similarity`, `used_receipt_ids`, etc.)
+> refer to the old single-pass matcher that was replaced. Most defects listed
+> here were resolved by the redesign (see `REDESIGN_PLAN.md` and the "resolved
+> defects" table in `AGENTS.md`). Retained as a historical record only.
+
 Source: parallel review of `pipeline/matcher.py` and `storage/db_client.py` by three
 focused agents (LLM prompt quality / control flow / candidate filtering & heuristics).
 Citations use `file:line`.

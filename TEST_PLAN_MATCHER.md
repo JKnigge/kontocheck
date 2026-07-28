@@ -1,5 +1,13 @@
 # Test Plan: `pipeline/matcher.py`
 
+> ⚠️ **OUTDATED — pre-redesign version.** This test plan references the old
+> function inventory (`_check_name_similarity`, `_try_match_receipt`,
+> `_compute_date_gap`, `_assign_delay_status`, etc.) and the old six-status
+> model. The actual tests now in `tests/` were rewritten for the two-pass
+> algorithm with three statuses (`MATCH`, `UNCERTAIN`, `NO_MATCH`); see
+> `AGENTS.md` for the current test inventory. Retained as a historical record
+> only.
+
 ## Context
 
 Before implementing the fixes catalogued in `MATCHER_REVIEW.md` (project root),

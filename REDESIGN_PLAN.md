@@ -1,6 +1,9 @@
 # Matcher Redesign Plan
 
-> **Status:** Draft — awaiting explicit go-ahead before implementation.
+> **Status:** Implemented — the two-pass algorithm described below is live in
+> `pipeline/matcher.py` as of the redesign commits (`164cd7c` Redesign Matcher
+> and db_client … `c47a813` Remove Date Tier). This document is retained as the
+> authoritative design record for the current matching logic.
 > **Scope:** `pipeline/matcher.py`, `storage/db_client.py`, `reporting/report.py`,
 > and the test suite. No changes to `config.py` semantics, `pipeline/extractor.py`,
 > `kontocheck.py`, or the DB schema (kontocheck stays read-only).

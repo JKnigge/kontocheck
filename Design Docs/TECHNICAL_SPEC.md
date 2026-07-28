@@ -1,8 +1,19 @@
 # kontocheck — Technical Specification & Design Document
 
+> ⚠️ **OUTDATED — pre-redesign version.** This document describes the original
+> single-pass matcher with six statuses (`MATCHED`, `MATCHED_LARGE_DELAY`,
+> `MATCHED_UNUSUAL_DELAY`, `MATCHED_UNREVIEWED`, `AMOUNT_MISMATCH`, `NO_MATCH`),
+> the `used_receipt_ids` / `used_regpayment_ids` greedy-commit mechanism, and
+> the old `_check_name_similarity` / `_try_match_receipt` / `_try_match_regpayment`
+> function inventory. All of these were replaced by the two-pass algorithm
+> (deferred commitment + global reconciliation) with three statuses
+> (`MATCH`, `UNCERTAIN`, `NO_MATCH`). For the current matching logic see
+> `REDESIGN_PLAN.md`; for the current test inventory see `AGENTS.md`. Retained
+> as a historical design record only.
+
 **Version:** 1.1  
 **Date:** 2026-05-08  
-**Status:** Approved — ready for implementation  
+**Status:** Approved — ready for implementation (superseded by redesign — see notice above)
 
 ### Changelog
 | Version | Change |

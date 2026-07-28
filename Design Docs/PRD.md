@@ -1,8 +1,16 @@
 # kontocheck — Product Requirements Document
 
+> ⚠️ **OUTDATED — pre-redesign version.** The product-level requirements
+> (purpose, user workflow, read-only constraint) are still valid, but the
+> matching-rules and status-set sections describe the original six-status model
+> that was replaced by three statuses (`MATCH`, `UNCERTAIN`, `NO_MATCH`) and a
+> two-pass algorithm. For the current matching logic see `REDESIGN_PLAN.md`;
+> for the current test inventory see `AGENTS.md`. Retained as a historical
+> design record only.
+
 **Version:** 1.0  
 **Date:** 2026-05-08  
-**Status:** Approved — ready for implementation  
+**Status:** Approved — ready for implementation (superseded by redesign — see notice above)
 
 ---
 
