@@ -446,7 +446,7 @@ def _build_candidate_info(c: dict, tx: Transaction, amount_match: bool) -> Candi
             cand_amount = Decimal(str(abs(c["amount"]))) / Decimal("100")
 
     if not amount_match and source == "regpayment":
-        note = "regpayment amount differs — update table if correct"
+        note = "amount differs"
 
     return CandidateInfo(
         source=source,
@@ -480,13 +480,6 @@ def _build_match_result(
         if chosen.get("manually_checked") is None and chosen.get("confidence") != "high":
             notes.append("Receipt flagged by belegbot — please verify")
 
-    if not amount_match and source == "regpayment":
-        expected_euros = abs(chosen["amount"]) / 100
-        notes.append(
-            f"regpayment amount differs — update table if correct "
-            f"(expected €{expected_euros:.2f}, actual €{tx.amount:.2f})"
-        )
-
     candidates = [_build_candidate_info(c, tx, amount_match=True) for c in ruled_out]
 
     return MatchResult(
@@ -510,27 +503,19 @@ def _build_uncertain_result(
     """Build an UNCERTAIN result listing the selected candidates.
 
     When a selected candidate's amount differs from the transaction
-    (Issue 1 name-only fallback with a match verdict), an "amount differs"
-    note is added so the reviewer knows the regpayment table may need an
-    update.
+    (Issue 1 name-only fallback with a match verdict), the "amount differs"
+    note is carried on the CandidateInfo.note (rendered as a trailing tag
+    by the report), not duplicated in result.notes.
     """
     cand_infos: list[CandidateInfo] = []
-    notes: list[str] = []
     for i, c in enumerate(candidates, start=1):
         if i in selected_indices:
             amt_match = amount_match if amount_match else c.get("__amount_match", True)
             cand_infos.append(_build_candidate_info(c, tx, amt_match))
-            if not amt_match and c["__source"] == "regpayment":
-                expected_euros = abs(c.get("amount", 0)) / 100
-                notes.append(
-                    f"regpayment amount differs — update table if correct "
-                    f"(expected €{expected_euros:.2f}, actual €{tx.amount:.2f})"
-                )
     return MatchResult(
         transaction=tx,
         status=UNCERTAIN,
         candidates=cand_infos,
-        notes=notes,
     )
 
 

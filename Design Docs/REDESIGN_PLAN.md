@@ -169,7 +169,7 @@ conflict is surfaced for human review.
 | `MATCHED_LARGE_DELAY` | Dropped. The `RECEIPT_DATE_WINDOW_DAYS` SQL bound already filters stale receipts; anything outside the window never becomes a candidate. |
 | `MATCHED_UNUSUAL_DELAY` | Dropped (same reason). |
 | `MATCHED_UNREVIEWED` | Dropped as a status. The belegbot `manually_checked=NULL` + `confidence != "high"` info is preserved as a **note** on a `MATCH` result: `"Receipt flagged by belegbot — please verify"`. |
-| `AMOUNT_MISMATCH` | Dropped as a status. A regpayment candidate that matches by name but differs in amount now surfaces as an `UNCERTAIN` candidate with `amount_match=False` and a note `"regpayment amount differs — update table if correct"`. |
+| `AMOUNT_MISMATCH` | Dropped as a status. A regpayment candidate that matches by name but differs in amount now surfaces as an `UNCERTAIN` candidate with `amount_match=False` and a note `"amount differs"`. |
 
 ### Statistics bucketing
 

@@ -240,9 +240,9 @@ r = results[0]
 check("status is UNCERTAIN (amount-mismatch requires manual review)",
       r.status == matcher.UNCERTAIN, f"got: {r.status}")
 check("matched_source is None", r.matched_source is None, f"got: {r.matched_source}")
-check("amount differs note present",   any("amount differs" in n.lower() for n in r.notes), f"got: {r.notes}")
-check("expected amount in note",       any("39.99" in n for n in r.notes), f"got: {r.notes}")
-check("actual amount in note",         any("42.99" in n for n in r.notes), f"got: {r.notes}")
+check("amount differs note present on candidate",
+      any("amount differs" in (c.note or "").lower() for c in r.candidates),
+      f"got: {[c.note for c in r.candidates]}")
 
 
 # ── Test 8: NO_MATCH ──────────────────────────────────────────────────────────

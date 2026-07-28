@@ -381,7 +381,8 @@ class TestMatchAll:
         assert len(results[0].candidates) == 1
         assert results[0].candidates[0].source == "regpayment"
         assert results[0].candidates[0].amount_match is False
-        assert any("amount differs" in n.lower() for n in results[0].notes)
+        assert any("amount differs" in (c.note or "").lower()
+                   for c in results[0].candidates)
 
     def test_name_only_fallback_amount_match_stays_match(self):
         """Name-only fallback where the chosen candidate's amount DOES

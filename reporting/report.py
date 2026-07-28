@@ -115,7 +115,7 @@ def _format_candidate(c: CandidateInfo) -> str:
     """Render one CandidateInfo as a compact display string.
 
     Receipts:   ``Name - filename: amount € (YYYY.mm.dd - nd)``
-    Regpayments: ``Name: amount € (regpayment)``
+    Regpayments: ``Name: amount € (regular payment)``
 
     A trailing ``— note`` is appended when the candidate carries a note
     (e.g. amount-differs or contested).
@@ -134,7 +134,7 @@ def _format_candidate(c: CandidateInfo) -> str:
     else:
         # regpayment
         amt = _format_candidate_amount(c)
-        line = f"{c.name}: {amt} (regpayment)"
+        line = f"{c.name}: {amt} (regular payment)"
 
     if c.note:
         line += f" — {c.note}"
@@ -148,7 +148,7 @@ def _row_details(r: MatchResult) -> str:
     For UNCERTAIN: render the candidate list, one candidate per line::
         Possible candidates:
         Name - file: amount € (date - nd)
-        Name: amount € (regpayment)
+        Name: amount € (regular payment)
     For NO_MATCH: render notes (if any).
     """
     if r.status == MATCH:

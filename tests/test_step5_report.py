@@ -148,7 +148,7 @@ cand_regpayment_mismatch = matcher.CandidateInfo(
     source="regpayment", id=12, name="Handyvertrag",
     amount=Decimal("12.99"), date=None,
     amount_match=False, date_gap_days=None,
-    note="regpayment amount differs — update table if correct",
+    note="amount differs",
 )
 cand_contested = matcher.CandidateInfo(
     source="receipt", id=6, name="REWE GmbH",
@@ -206,10 +206,6 @@ results = [
         transaction=make_tx("NETFLIX ABO", 14.99, tx_date=date(2024, 4, 22)),
         status=matcher.UNCERTAIN,
         candidates=[cand_regpayment_mismatch],
-        notes=[
-            "regpayment amount differs — update table if correct "
-            "(expected €12.99, actual €14.99)"
-        ],
     ),
     # NO_MATCH
     matcher.MatchResult(
@@ -338,8 +334,8 @@ try:
           "Telekom - 20240320-Telekom.pdf: 39.99 € (2024.03.20 - 10d)" in text,
           "expected receipt candidate in 'Name - file: amt € (date - nd)' format")
     check("regpayment candidate rendered with new format",
-          "Handyvertrag: 12.99 € (regpayment)" in text,
-          "expected regpayment candidate in 'Name: amt € (regpayment)' format")
+          "Handyvertrag: 12.99 € (regular payment)" in text,
+          "expected regpayment candidate in 'Name: amt € (regular payment)' format")
     check("candidates separated by <br> in table cell", "<br>" in text)
 
     # ── Multiple candidates with one per line, ordered by date gap ───────
